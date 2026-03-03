@@ -208,6 +208,10 @@ function App() {
   const handleSelectLayout = (layout) => {
     setSelectedLayoutId(layout.id);
     setEditingLayout({ ...layout });
+    // Reset preview
+    setPreviewFile(null);
+    setTestExtractResult(null);
+    setTestKeywordResult(null);
   };
 
   const handleNewLayout = () => {
@@ -215,10 +219,13 @@ function App() {
     setEditingLayout({
       name: '新規レイアウト', 
       keyword: '', 
-      keyword_x0: 100, keyword_y0: 100, keyword_x1: 200, keyword_y1: 200,
-      extract_x0: 100, extract_y0: 100, extract_x1: 200, extract_y1: 200
+      keyword_x0: 50, keyword_y0: 50, keyword_x1: 150, keyword_y1: 150,
+      extract_x0: 50, extract_y0: 50, extract_x1: 150, extract_y1: 150
     });
-    // Ensure form state is clean
+    // Reset preview and errors
+    setPreviewFile(null);
+    setTestExtractResult(null);
+    setTestKeywordResult(null);
     setError(null);
     setSuccessMsg(null);
   };
@@ -345,21 +352,33 @@ function App() {
     }
 
     try {
+      // Update layout in state directly to reflect changes immediately
+      const newLayouts = selectedLayoutId 
+          ? layouts.map(l => l.id === selectedLayoutId ? updatedLayout : l)
+          : [...layouts, updatedLayout]; // Ideally should use response from server for ID, but let's re-fetch
+
+      // Optimistic update (removed to avoid flickering, relying on server response)
+      
       if (selectedLayoutId) {
           // Update existing layout
-          await axios.put(`${API_BASE_URL}/api/settings/${selectedLayoutId}`, editingLayout);
-          setSuccessMsg(`レイアウト「${editingLayout.name}」を更新しました。`);
+          const res = await axios.put(`${API_BASE_URL}/api/settings/${selectedLayoutId}`, editingLayout);
+          setLayouts(layouts.map(l => l.id === selectedLayoutId ? res.data : l));
+          setSuccessMsg(`レイアウト「${res.data.name}」を更新しました。`);
       } else {
           // Create new layout
-          await axios.post(`${API_BASE_URL}/api/settings`, editingLayout);
-          setSuccessMsg(`レイアウト「${editingLayout.name}」を保存しました。`);
+          const res = await axios.post(`${API_BASE_URL}/api/settings`, editingLayout);
+          // Set selected to new layout
+          const createdLayout = res.data;
+          setSelectedLayoutId(createdLayout.id); // Select the newly created layout
+          setLayouts([...layouts, createdLayout]); // Add to list immediately
+          setSuccessMsg(`レイアウト「${createdLayout.name}」を保存しました。`);
       }
       
-      fetchLayouts();
       setError(null);
     } catch (err) {
         console.error(err);
         setError('設定の保存に失敗しました。');
+        fetchLayouts(); // Revert on error
     }
   };
 
