@@ -117,7 +117,11 @@ function App() {
       const res = await axios.post(`${API_BASE_URL}/api/scan`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
-      setScanResults(res.data);
+      const processedData = res.data.map(item => ({
+        ...item,
+        is_output_target: true
+      }));
+      setScanResults(processedData);
       setCurrentStep(3); // Go to Output step
     } catch (err) {
       console.error(err);
@@ -158,7 +162,14 @@ function App() {
     setIsProcessing(true);
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('metadata', JSON.stringify(scanResults));
+    // Only send selected items
+    const selectedResults = scanResults.filter(r => r.is_output_target);
+    if (selectedResults.length === 0) {
+        setError('出力対象のファイルが選択されていません。');
+        setIsProcessing(false);
+        return;
+    }
+    formData.append('metadata', JSON.stringify(selectedResults));
 
     try {
       const res = await axios.post(`${API_BASE_URL}/api/execute`, formData, {
@@ -615,11 +626,11 @@ function App() {
                         <thead className="sticky top-0 z-10 bg-white shadow-sm">
                             <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                             <th className="px-2 py-3 w-10 text-center bg-slate-50"></th>
-                            <th className="px-6 py-3 w-16 text-center bg-slate-50">No.</th>
-                            <th className="px-6 py-3 w-24 text-center bg-slate-50">Page</th>
-                            <th className="px-6 py-3 bg-slate-50">レイアウト種別</th>
-                            <th className="px-6 py-3 w-1/3 bg-slate-50">出力ファイル名</th>
-                            <th className="px-6 py-3 w-32 text-center bg-slate-50">結合</th>
+                            <th className="px-2 py-3 w-12 text-center bg-slate-50">No.</th>
+                            <th className="px-2 py-3 w-16 text-center bg-slate-50">PAGE</th>
+                            <th className="px-4 py-3 w-32 bg-slate-50">レイアウト種別</th>
+                            <th className="px-6 py-3 w-auto bg-slate-50">出力対象 / 出力ファイル名</th>
+                            <th className="px-4 py-3 w-24 text-center bg-slate-50">結合</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 text-sm bg-white">
@@ -634,13 +645,13 @@ function App() {
                                             <Plus className={cn("w-4 h-4 transition-transform", expandedRows.has(index) ? "rotate-45 text-indigo-600" : "")} />
                                         </button>
                                     </td>
-                                    <td className="px-6 py-4 text-center text-slate-400">{index + 1}</td>
-                                    <td className="px-6 py-4 text-center">
-                                        <div className="font-medium text-slate-700 bg-slate-50 mx-2 rounded border border-slate-100 py-1">
+                                    <td className="px-2 py-4 text-center text-slate-400">{index + 1}</td>
+                                    <td className="px-2 py-4 text-center">
+                                        <div className="font-medium text-slate-700 bg-slate-50 mx-1 rounded border border-slate-100 py-1">
                                             P.{result.page_number}
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4">
+                                    <td className="px-4 py-4">
                                         <span className={cn(
                                             "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
                                             result.layout_name === "Unknown" 
@@ -651,24 +662,35 @@ function App() {
                                         </span>
                                     </td>
                                     <td className={cn("px-6 py-4", result.should_merge && "opacity-50")}>
-                                        {result.should_merge ? (
-                                            <span className="text-slate-400 text-xs italic">（前のページと結合）</span>
-                                        ) : (
-                                            <input 
-                                                type="text" 
-                                                value={result.confirmed_name}
-                                                onChange={(e) => handleResultChange(index, 'confirmed_name', e.target.value)}
-                                                placeholder={!result.confirmed_name ? "※必須項目です" : ""}
-                                                className={cn(
-                                                    "w-full rounded px-3 py-1.5 focus:outline-none focus:ring-2 transition-all font-medium",
-                                                    !result.confirmed_name 
-                                                        ? "bg-red-50 border border-red-300 text-slate-900 focus:ring-red-200 focus:border-red-500 placeholder:text-red-400" 
-                                                        : "bg-slate-50 border border-slate-200 text-slate-700 focus:ring-indigo-500/20 focus:border-indigo-500"
-                                                )}
-                                            />
-                                        )}
+                                        <div className="flex items-center gap-3 w-full">
+                                            {!result.should_merge && (
+                                                <input 
+                                                    type="checkbox" 
+                                                    className="accent-indigo-600 w-5 h-5 shrink-0 cursor-pointer"
+                                                    checked={result.is_output_target}
+                                                    onChange={(e) => handleResultChange(index, 'is_output_target', e.target.checked)}
+                                                    title="出力対象にする"
+                                                />
+                                            )}
+                                            {result.should_merge ? (
+                                                <span className="text-slate-400 text-xs italic w-full">（前のページと結合）</span>
+                                            ) : (
+                                                <input 
+                                                    type="text" 
+                                                    value={result.confirmed_name}
+                                                    onChange={(e) => handleResultChange(index, 'confirmed_name', e.target.value)}
+                                                    placeholder={!result.confirmed_name ? "※必須項目です" : ""}
+                                                    className={cn(
+                                                        "w-full rounded px-3 py-1.5 focus:outline-none focus:ring-2 transition-all font-medium",
+                                                        !result.confirmed_name 
+                                                            ? "bg-red-50 border border-red-300 text-slate-900 focus:ring-red-200 focus:border-red-500 placeholder:text-red-400" 
+                                                            : "bg-slate-50 border border-slate-200 text-slate-700 focus:ring-indigo-500/20 focus:border-indigo-500"
+                                                    )}
+                                                />
+                                            )}
+                                        </div>
                                     </td>
-                                    <td className="px-6 py-4 text-center">
+                                    <td className="px-4 py-4 text-center">
                                         {index > 0 && (
                                             <label className="relative inline-flex items-center cursor-pointer">
                                                 <input 
@@ -687,7 +709,9 @@ function App() {
                                         <td colSpan="6" className="px-6 py-3 border-b border-indigo-100">
                                             <div className="flex gap-6 text-xs text-slate-600 pl-10">
                                                 <div className="flex flex-col gap-1 w-1/2">
-                                                    <span className="font-bold text-indigo-600 uppercase tracking-wider text-[10px]">Detected Keyword Text</span>
+                                                    <span className="font-bold text-indigo-600 uppercase tracking-wider text-[10px]">
+                                                        Detected Keyword (for {result.layout_name})
+                                                    </span>
                                                     <div className="bg-white p-2 rounded border border-slate-200 font-mono text-slate-800 break-all min-h-[2.5em]">
                                                         {result.found_keyword_text ? result.found_keyword_text : <span className="text-slate-400 italic">(None)</span>}
                                                     </div>
