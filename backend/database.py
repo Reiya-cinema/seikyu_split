@@ -1,9 +1,17 @@
 from sqlalchemy import create_engine, Column, Integer, String, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+import os
 
-# SQLite database URL (can be changed to PostgreSQL for production)
-SQLALCHEMY_DATABASE_URL = "sqlite:///./layout_settings.db"
+# SQLite database URL
+# If /data directory exists (Railway Volume), use it for persistence.
+# Otherwise use local file (ephemeral in cloud, persistent locally).
+if os.path.exists("/data"):
+    SQLALCHEMY_DATABASE_URL = "sqlite:////data/layout_settings.db"
+    print("Using persistent volume database: /data/layout_settings.db")
+else:
+    SQLALCHEMY_DATABASE_URL = "sqlite:///./layout_settings.db"
+    print("Using local database: ./layout_settings.db")
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
