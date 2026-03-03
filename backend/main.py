@@ -114,6 +114,7 @@ async def extract_text_preview(
                 cropped_page = page.crop(bbox=area)
                 extracted_text_raw = cropped_page.extract_text() or ""
                 extracted_text = clean_text(extracted_text_raw)
+                extracted_text = remove_whitespace(extracted_text) # Apply same whitespace removal as production scan
             except ValueError:
                 # This usually happens if the crop area is completely outside the page bounds
                 extracted_text = "指定範囲がページ外です"
