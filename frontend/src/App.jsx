@@ -367,26 +367,23 @@ function App() {
     }
 
     try {
-      // Update layout in state directly to reflect changes immediately
-      const newLayouts = selectedLayoutId 
-          ? layouts.map(l => l.id === selectedLayoutId ? updatedLayout : l)
-          : [...layouts, updatedLayout]; // Ideally should use response from server for ID, but let's re-fetch
-
-      // Optimistic update (removed to avoid flickering, relying on server response)
-      
       if (selectedLayoutId) {
           // Update existing layout
+          // Strip ID from payload if necessary, though FastAPI handles it usually. 
+          // Safest to just send the fields we edit or the whole object if backend is lenient.
+          // We will send editingLayout as is, assuming backend ignores 'id' in body or matches it.
           const res = await axios.put(`${API_BASE_URL}/api/settings/${selectedLayoutId}`, editingLayout);
+          
           // Only update the specific item in the list
           setLayouts(layouts.map(l => l.id === selectedLayoutId ? res.data : l));
           setSuccessMsg(`レイアウト「${res.data.name}」を更新しました。`);
       } else {
-          // Fallback if somehow selectedLayoutId is null (should not happen with new logic)
-          // Create new layout
+          // Fallback: Create new layout if no ID (e.g. after delete but user types and saves)
           const res = await axios.post(`${API_BASE_URL}/api/settings`, editingLayout);
           const createdLayout = res.data;
-          setSelectedLayoutId(createdLayout.id); // Select the newly created layout
-          setLayouts([...layouts, createdLayout]); // Add to list immediately
+          
+          setSelectedLayoutId(createdLayout.id);
+          setLayouts([...layouts, createdLayout]);
           setSuccessMsg(`レイアウト「${createdLayout.name}」を保存しました。`);
       }
       
@@ -394,7 +391,6 @@ function App() {
     } catch (err) {
         console.error(err);
         setError('設定の保存に失敗しました。');
-        fetchLayouts(); // Revert on error
     }
   };
 
@@ -404,8 +400,20 @@ function App() {
 
       try {
           await axios.delete(`${API_BASE_URL}/api/settings/${selectedLayoutId}`);
-          fetchLayouts();
-          handleNewLayout(); // Reset to new layout state
+          
+          // Decrease layout count / remove from list
+          const remainingLayouts = layouts.filter(l => l.id !== selectedLayoutId);
+          setLayouts(remainingLayouts);
+          
+          // Reset selection to empty state
+          setSelectedLayoutId(null);
+          setEditingLayout({
+            name: '新規レイアウト', 
+            keyword: '', 
+            keyword_x0: 50, keyword_y0: 50, keyword_x1: 150, keyword_y1: 150,
+            extract_x0: 50, extract_y0: 50, extract_x1: 150, extract_y1: 150
+          });
+          
           setSuccessMsg("レイアウトを削除しました。");
       } catch (err) {
           console.error(err);
@@ -846,144 +854,153 @@ function App() {
                         )}
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                        {/* Name Input */}
-                        <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-1">レイアウト名</label>
-                            <input
-                                type="text"
-                                value={editingLayout.name}
-                                onChange={(e) => handleLayoutChange('name', e.target.value)}
-                                className="w-full text-sm font-bold text-slate-800 border-b-2 border-slate-200 focus:border-indigo-600 outline-none py-1 transition-colors px-1 bg-transparent"
-                                placeholder="レイアウト名を入力"
-                            />
+                    {!selectedLayoutId ? (
+                        <div className="flex-1 flex flex-col items-center justify-center text-slate-300 gap-2">
+                            <Split className="w-8 h-8 opacity-20" />
+                            <p className="text-xs font-bold">レイアウトを選択してください</p>
                         </div>
-
-                        {/* Step 1: Identification */}
-                        <div className="bg-slate-50/50 rounded-lg border border-slate-200 overflow-hidden">
-                            <div className="px-3 py-2 bg-indigo-50/50 border-b border-indigo-100 flex items-center gap-2">
-                                <span className="bg-indigo-600 text-white w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold">1</span>
-                                <span className="text-xs font-bold text-indigo-900">識別条件 (Keyword)</span>
-                            </div>
-                            
-                            <div className="p-3 space-y-3">
+                    ) : (
+                        <>
+                            <div className="flex-1 overflow-y-auto p-4 space-y-6">
+                                {/* Name Input */}
                                 <div>
-                                    <label className="block text-[10px] font-bold text-slate-500 mb-1">判別キーワード</label>
-                                    <input 
-                                        type="text" 
-                                        value={editingLayout.keyword}
-                                        onChange={(e) => handleLayoutChange('keyword', e.target.value)}
-                                        className="w-full border border-slate-300 rounded px-2 py-1.5 text-xs outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200" 
-                                        placeholder="例: 請求書"
+                                    <label className="block text-xs font-bold text-slate-500 mb-1">レイアウト名</label>
+                                    <input
+                                        type="text"
+                                        value={editingLayout.name}
+                                        onChange={(e) => handleLayoutChange('name', e.target.value)}
+                                        className="w-full text-sm font-bold text-slate-800 border-b-2 border-slate-200 focus:border-indigo-600 outline-none py-1 transition-colors px-1 bg-transparent"
+                                        placeholder="レイアウト名を入力"
                                     />
                                 </div>
-                                
-                                <div>
-                                    <label className="block text-[10px] font-bold text-slate-500 mb-1">検索エリア (mm)</label>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        {['x0', 'y0', 'x1', 'y1'].map((coord) => (
-                                            <div key={`key_${coord}`} className="flex items-center gap-1 bg-white border border-slate-200 rounded px-2 py-1">
-                                                <span className="text-[10px] text-slate-400 uppercase w-4">{coord}</span>
-                                                <input 
-                                                    type="number" 
-                                                    className="flex-1 min-w-0 text-xs text-right outline-none font-mono" 
-                                                    value={editingLayout[`keyword_${coord}`]} 
-                                                    onChange={(e) => handleLayoutChange(`keyword_${coord}`, parseFloat(e.target.value))} 
-                                                />
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                                <div className="mt-2 pt-2 border-t border-indigo-100 flex flex-col gap-2">
-                                    <button 
-                                        onClick={handleKeywordTest}
-                                        disabled={isTestKeyword}
-                                        className={cn(
-                                            "w-full py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 shadow-sm",
-                                            !previewFile 
-                                                ? "bg-slate-200 text-slate-400 cursor-not-allowed" 
-                                                : "bg-indigo-600 hover:bg-indigo-700 text-white"
-                                        )}
-                                        title={!previewFile ? "プレビュー用PDFをアップロードしてください" : "指定エリアのテキスト抽出テストを実行"}
-                                    >
-                                        {isTestKeyword ? <Loader2 className="w-3 h-3 animate-spin" /> : <Eye className="w-3 h-3" />}
-                                        抽出テスト実行
-                                    </button>
-                                     {testKeywordResult !== null && (
-                                         <div className="bg-indigo-50 border border-indigo-200 rounded p-2 text-xs">
-                                             <span className="text-[10px] font-bold text-indigo-800 block mb-0.5">抽出結果:</span>
-                                             <div className="bg-white border border-indigo-100 rounded p-1.5 text-slate-700 min-h-[1.5em] break-all font-mono">
-                                                 {testKeywordResult || <span className="text-slate-400 italic">(空)</span>}
-                                             </div>
-                                         </div>
-                                     )}
-                                </div>
-                            </div>
-                        </div>
 
-                        {/* Step 2: Extraction */}
-                        <div className="bg-slate-50/50 rounded-lg border border-slate-200 overflow-hidden">
-                            <div className="px-3 py-2 bg-emerald-50/50 border-b border-emerald-100 flex items-center gap-2">
-                                <span className="bg-emerald-600 text-white w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold">2</span>
-                                <span className="text-xs font-bold text-emerald-900">ファイル名抽出 (Extract)</span>
-                            </div>
-                            
-                            <div className="p-3 space-y-3">
-                                <p className="text-[10px] text-slate-500 leading-tight">
-                                    指定エリアの文字を読み取り、ファイル名に使用します。
-                                </p>
-                                
-                                <div>
-                                    <label className="block text-[10px] font-bold text-slate-500 mb-1">抽出エリア (mm)</label>
-                                    <div className="grid grid-cols-2 gap-2">
-                                        {['x0', 'y0', 'x1', 'y1'].map((coord) => (
-                                            <div key={`extract_${coord}`} className="flex items-center gap-1 bg-white border border-slate-200 rounded px-2 py-1">
-                                                <span className="text-[10px] text-slate-400 uppercase w-4">{coord}</span>
-                                                <input 
-                                                    type="number" 
-                                                    className="flex-1 min-w-0 text-xs text-right outline-none font-mono" 
-                                                    value={editingLayout[`extract_${coord}`]} 
-                                                    onChange={(e) => handleLayoutChange(`extract_${coord}`, parseFloat(e.target.value))} 
-                                                />
-                                            </div>
-                                        ))}
+                                {/* Step 1: Identification */}
+                                <div className="bg-slate-50/50 rounded-lg border border-slate-200 overflow-hidden">
+                                    <div className="px-3 py-2 bg-indigo-50/50 border-b border-indigo-100 flex items-center gap-2">
+                                        <span className="bg-indigo-600 text-white w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold">1</span>
+                                        <span className="text-xs font-bold text-indigo-900">識別条件 (Keyword)</span>
                                     </div>
                                     
-                                    <div className="mt-3 pt-2 border-t border-emerald-100 flex flex-col gap-2">
-                                          <button 
-                                             onClick={handleExtractTest}
-                                             disabled={isTestExtracting}
-                                             className={cn(
-                                                "w-full py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 shadow-sm",
-                                                !previewFile 
-                                                    ? "bg-slate-200 text-slate-400 cursor-not-allowed" 
-                                                    : "bg-emerald-600 hover:bg-emerald-700 text-white"
-                                             )}
-                                             title={!previewFile ? "プレビュー用PDFをアップロードしてください" : "指定エリアのテキスト抽出テストを実行"}
-                                          >
-                                             {isTestExtracting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Eye className="w-3 h-3" />}
-                                             抽出テスト実行
-                                          </button>
+                                    <div className="p-3 space-y-3">
+                                        <div>
+                                            <label className="block text-[10px] font-bold text-slate-500 mb-1">判別キーワード</label>
+                                            <input 
+                                                type="text" 
+                                                value={editingLayout.keyword}
+                                                onChange={(e) => handleLayoutChange('keyword', e.target.value)}
+                                                className="w-full border border-slate-300 rounded px-2 py-1.5 text-xs outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200" 
+                                                placeholder="例: 請求書"
+                                            />
+                                        </div>
+                                        
+                                        <div>
+                                            <label className="block text-[10px] font-bold text-slate-500 mb-1">検索エリア (mm)</label>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                {['x0', 'y0', 'x1', 'y1'].map((coord) => (
+                                                    <div key={`key_${coord}`} className="flex items-center gap-1 bg-white border border-slate-200 rounded px-2 py-1">
+                                                        <span className="text-[10px] text-slate-400 uppercase w-4">{coord}</span>
+                                                        <input 
+                                                            type="number" 
+                                                            className="flex-1 min-w-0 text-xs text-right outline-none font-mono" 
+                                                            value={editingLayout[`keyword_${coord}`]} 
+                                                            onChange={(e) => handleLayoutChange(`keyword_${coord}`, parseFloat(e.target.value))} 
+                                                        />
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div className="mt-2 pt-2 border-t border-indigo-100 flex flex-col gap-2">
+                                            <button 
+                                                onClick={handleKeywordTest}
+                                                disabled={isTestKeyword}
+                                                className={cn(
+                                                    "w-full py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 shadow-sm",
+                                                    !previewFile 
+                                                        ? "bg-slate-200 text-slate-400 cursor-not-allowed" 
+                                                        : "bg-indigo-600 hover:bg-indigo-700 text-white"
+                                                )}
+                                                title={!previewFile ? "プレビュー用PDFをアップロードしてください" : "指定エリアのテキスト抽出テストを実行"}
+                                            >
+                                                {isTestKeyword ? <Loader2 className="w-3 h-3 animate-spin" /> : <Eye className="w-3 h-3" />}
+                                                抽出テスト実行
+                                            </button>
+                                            {testKeywordResult !== null && (
+                                                <div className="bg-indigo-50 border border-indigo-200 rounded p-2 text-xs">
+                                                    <span className="text-[10px] font-bold text-indigo-800 block mb-0.5">抽出結果:</span>
+                                                    <div className="bg-white border border-indigo-100 rounded p-1.5 text-slate-700 min-h-[1.5em] break-all font-mono">
+                                                        {testKeywordResult || <span className="text-slate-400 italic">(空)</span>}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
 
-                                         {testExtractResult !== null && (
-                                             <div className="bg-emerald-50 border border-emerald-200 rounded p-2 text-xs">
-                                                 <span className="text-[10px] font-bold text-emerald-800 block mb-0.5">抽出結果:</span>
-                                                 <div className="bg-white border border-emerald-100 rounded p-1.5 text-slate-700 min-h-[1.5em] break-all font-mono">
-                                                     {testExtractResult || <span className="text-slate-400 italic">(空)</span>}
-                                                 </div>
-                                             </div>
-                                         )}
+                                {/* Step 2: Extraction */}
+                                <div className="bg-slate-50/50 rounded-lg border border-slate-200 overflow-hidden">
+                                    <div className="px-3 py-2 bg-emerald-50/50 border-b border-emerald-100 flex items-center gap-2">
+                                        <span className="bg-emerald-600 text-white w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold">2</span>
+                                        <span className="text-xs font-bold text-emerald-900">ファイル名抽出 (Extract)</span>
+                                    </div>
+                                    
+                                    <div className="p-3 space-y-3">
+                                        <p className="text-[10px] text-slate-500 leading-tight">
+                                            指定エリアの文字を読み取り、ファイル名に使用します。
+                                        </p>
+                                        
+                                        <div>
+                                            <label className="block text-[10px] font-bold text-slate-500 mb-1">抽出エリア (mm)</label>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                {['x0', 'y0', 'x1', 'y1'].map((coord) => (
+                                                    <div key={`extract_${coord}`} className="flex items-center gap-1 bg-white border border-slate-200 rounded px-2 py-1">
+                                                        <span className="text-[10px] text-slate-400 uppercase w-4">{coord}</span>
+                                                        <input 
+                                                            type="number" 
+                                                            className="flex-1 min-w-0 text-xs text-right outline-none font-mono" 
+                                                            value={editingLayout[`extract_${coord}`]} 
+                                                            onChange={(e) => handleLayoutChange(`extract_${coord}`, parseFloat(e.target.value))} 
+                                                        />
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            
+                                            <div className="mt-3 pt-2 border-t border-emerald-100 flex flex-col gap-2">
+                                                <button 
+                                                    onClick={handleExtractTest}
+                                                    disabled={isTestExtracting}
+                                                    className={cn(
+                                                        "w-full py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 shadow-sm",
+                                                        !previewFile 
+                                                            ? "bg-slate-200 text-slate-400 cursor-not-allowed" 
+                                                            : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                                                    )}
+                                                    title={!previewFile ? "プレビュー用PDFをアップロードしてください" : "指定エリアのテキスト抽出テストを実行"}
+                                                >
+                                                    {isTestExtracting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Eye className="w-3 h-3" />}
+                                                    抽出テスト実行
+                                                </button>
+
+                                                {testExtractResult !== null && (
+                                                    <div className="bg-emerald-50 border border-emerald-200 rounded p-2 text-xs">
+                                                        <span className="text-[10px] font-bold text-emerald-800 block mb-0.5">抽出結果:</span>
+                                                        <div className="bg-white border border-emerald-100 rounded p-1.5 text-slate-700 min-h-[1.5em] break-all font-mono">
+                                                            {testExtractResult || <span className="text-slate-400 italic">(空)</span>}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-                    
-                    <div className="p-4 border-t border-slate-100 bg-white shadow-[0_-4px_6px_-2px_rgba(0,0,0,0.02)]">
-                        <button onClick={handleSaveLayout} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg shadow-sm shadow-indigo-200 text-sm font-bold transition-all flex items-center justify-center gap-2">
-                            <Save className="w-4 h-4" /> 設定を保存
-                        </button>
-                    </div>
+                            
+                            <div className="p-4 border-t border-slate-100 bg-white shadow-[0_-4px_6px_-2px_rgba(0,0,0,0.02)]">
+                                <button onClick={handleSaveLayout} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg shadow-sm shadow-indigo-200 text-sm font-bold transition-all flex items-center justify-center gap-2">
+                                    <Save className="w-4 h-4" /> 設定を保存
+                                </button>
+                            </div>
+                        </>
+                    )}
                 </div>
 
                 {/* 3. Preview (55%) */}
