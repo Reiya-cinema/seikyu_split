@@ -214,20 +214,35 @@ function App() {
     setTestKeywordResult(null);
   };
 
-  const handleNewLayout = () => {
-    setSelectedLayoutId(null);
-    setEditingLayout({
-      name: '新規レイアウト', 
-      keyword: '', 
-      keyword_x0: 50, keyword_y0: 50, keyword_x1: 150, keyword_y1: 150,
-      extract_x0: 50, extract_y0: 50, extract_x1: 150, extract_y1: 150
-    });
-    // Reset preview and errors
+  const handleNewLayout = async () => {
+    // Reset preview and errors first
     setPreviewFile(null);
     setTestExtractResult(null);
     setTestKeywordResult(null);
     setError(null);
     setSuccessMsg(null);
+
+    // Initial data for new layout
+    const initialData = {
+      name: '新規レイアウト', 
+      keyword: '', 
+      keyword_x0: 50, keyword_y0: 50, keyword_x1: 150, keyword_y1: 150,
+      extract_x0: 50, extract_y0: 50, extract_x1: 150, extract_y1: 150
+    };
+
+    try {
+        // Create immediately on server to get an ID
+        const res = await axios.post(`${API_BASE_URL}/api/settings`, initialData);
+        const createdLayout = res.data;
+        
+        // Add to list and select it
+        setLayouts([...layouts, createdLayout]);
+        setSelectedLayoutId(createdLayout.id);
+        setEditingLayout(createdLayout);
+    } catch (err) {
+        console.error("Failed to create new layout", err);
+        setError("新規レイアウトの作成に失敗しました。");
+    }
   };
 
   const handleLayoutChange = (field, value) => {
@@ -362,12 +377,13 @@ function App() {
       if (selectedLayoutId) {
           // Update existing layout
           const res = await axios.put(`${API_BASE_URL}/api/settings/${selectedLayoutId}`, editingLayout);
+          // Only update the specific item in the list
           setLayouts(layouts.map(l => l.id === selectedLayoutId ? res.data : l));
           setSuccessMsg(`レイアウト「${res.data.name}」を更新しました。`);
       } else {
+          // Fallback if somehow selectedLayoutId is null (should not happen with new logic)
           // Create new layout
           const res = await axios.post(`${API_BASE_URL}/api/settings`, editingLayout);
-          // Set selected to new layout
           const createdLayout = res.data;
           setSelectedLayoutId(createdLayout.id); // Select the newly created layout
           setLayouts([...layouts, createdLayout]); // Add to list immediately
