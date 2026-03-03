@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Upload, FileText, CheckCircle, Split, Settings, List, Plus, Save, Trash2, ArrowRight, Loader2, AlertCircle, Eye, X, RotateCcw } from 'lucide-react';
+import { Upload, FileText, CheckCircle, Split, Settings, List, Plus, Save, Trash2, ArrowRight, Loader2, AlertCircle, Eye, X, RotateCcw, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 import * as Tabs from '@radix-ui/react-tabs';
@@ -267,6 +267,52 @@ function App() {
         console.error("Failed to create new layout", err);
         setError("新規レイアウトの作成に失敗しました。");
     }
+  };
+
+  const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
+
+  const handleSort = (key) => {
+    let direction = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+
+    const sortedResults = [...scanResults].sort((a, b) => {
+      let valA = a[key];
+      let valB = b[key];
+
+      // Handle nulls/undefined
+      if (valA === undefined || valA === null) valA = "";
+      if (valB === undefined || valB === null) valB = "";
+
+      // Special handling for layout_name to sort Unknown last or first
+      if (key === 'layout_name') {
+        if (valA === 'Unknown') valA = 'zzzz'; // Push to end
+        if (valB === 'Unknown') valB = 'zzzz';
+      }
+
+      // Check if number
+      if (key === 'page_number') {
+        return direction === 'asc' ? valA - valB : valB - valA;
+      }
+
+      // String comparison
+      const strA = String(valA).toLowerCase();
+      const strB = String(valB).toLowerCase();
+
+      if (strA < strB) return direction === 'asc' ? -1 : 1;
+      if (strA > strB) return direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    setScanResults(sortedResults);
+  };
+
+  const RenderSortIcon = ({ columnKey }) => {
+    if (sortConfig.key !== columnKey) return <ArrowUpDown className="w-3 h-3 text-slate-300" />;
+    if (sortConfig.direction === 'asc') return <ArrowUp className="w-3 h-3 text-indigo-600" />;
+    return <ArrowDown className="w-3 h-3 text-indigo-600" />;
   };
 
   const handleLayoutChange = (field, value) => {
@@ -692,9 +738,33 @@ function App() {
                             <tr className="border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                             <th className="px-2 py-3 w-10 text-center bg-slate-50"></th>
                             <th className="px-2 py-3 w-12 text-center bg-slate-50">No.</th>
-                            <th className="px-2 py-3 w-16 text-center bg-slate-50">PAGE</th>
-                            <th className="px-4 py-3 w-32 bg-slate-50">レイアウト種別</th>
-                            <th className="px-6 py-3 w-auto bg-slate-50">出力対象 / 出力ファイル名</th>
+                            <th 
+                                className="px-2 py-3 w-16 text-center bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors select-none"
+                                onClick={() => handleSort('page_number')}
+                            >
+                                <div className="flex items-center justify-center gap-1">
+                                    PAGE
+                                    <RenderSortIcon columnKey="page_number" />
+                                </div>
+                            </th>
+                            <th 
+                                className="px-4 py-3 w-32 bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors select-none"
+                                onClick={() => handleSort('layout_name')}
+                            >
+                                <div className="flex items-center gap-1">
+                                    レイアウト種別
+                                    <RenderSortIcon columnKey="layout_name" />
+                                </div>
+                            </th>
+                            <th 
+                                className="px-6 py-3 w-auto bg-slate-50 cursor-pointer hover:bg-slate-100 transition-colors select-none"
+                                onClick={() => handleSort('confirmed_name')}
+                            >
+                                <div className="flex items-center gap-1">
+                                    出力対象 / 出力ファイル名
+                                    <RenderSortIcon columnKey="confirmed_name" />
+                                </div>
+                            </th>
                             <th className="px-4 py-3 w-24 text-center bg-slate-50">結合</th>
                             </tr>
                         </thead>
@@ -738,7 +808,7 @@ function App() {
                                                 />
                                             )}
                                             {result.should_merge ? (
-                                                <span className="text-slate-400 text-xs italic w-full">（前のページと結合）</span>
+                                                <span className="text-slate-400 text-xs italic w-full">（上のページと結合）</span>
                                             ) : (
                                                 <input 
                                                     type="text" 
