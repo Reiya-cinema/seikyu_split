@@ -715,6 +715,25 @@ function App() {
                                                     <div className="bg-white p-2 rounded border border-slate-200 font-mono text-slate-800 break-all min-h-[2.5em]">
                                                         {result.found_keyword_text ? result.found_keyword_text : <span className="text-slate-400 italic">(None)</span>}
                                                     </div>
+                                                    
+                                                    {/* Detection Log */}
+                                                    {result.detection_log && result.detection_log.length > 0 && (
+                                                        <div className="mt-2">
+                                                            <div 
+                                                                className="text-[10px] font-bold text-slate-500 mb-1 cursor-pointer flex items-center gap-1 hover:text-slate-700"
+                                                                onClick={(e) => {
+                                                                    const pre = e.currentTarget.nextElementSibling;
+                                                                    if(pre) pre.classList.toggle('hidden');
+                                                                }}
+                                                            >
+                                                                <span>Details / Logs</span>
+                                                                <span className="text-[8px] bg-slate-200 px-1 rounded">▼</span>
+                                                            </div>
+                                                            <pre className="hidden text-[9px] bg-slate-100 p-2 rounded border border-slate-200 overflow-x-auto whitespace-pre-wrap font-mono text-slate-600 max-h-32 overflow-y-auto">
+                                                                {result.detection_log.join('\n')}
+                                                            </pre>
+                                                        </div>
+                                                    )}
                                                 </div>
                                                 <div className="flex flex-col gap-1 w-1/2">
                                                     <span className="font-bold text-emerald-600 uppercase tracking-wider text-[10px]">Extracted File Name Text</span>

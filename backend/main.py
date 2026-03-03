@@ -58,10 +58,13 @@ def remove_whitespace(text: str) -> str:
 # Models
 class ScanResultItem(BaseModel):
     page_number: int
-    extracted_text: str
+    # extracted_text: str
     layout_name: str
     confirmed_name: str
     should_merge: bool
+    found_keyword_text: str
+    # Add history field to store all checked layouts up to success or failure
+    detection_log: List[str]
 
 # API Endpoints
 
@@ -157,6 +160,7 @@ async def scan_pdf(
                 detected_layout = "Unknown"
                 extracted_name = ""
                 found_keyword_text = ""
+                detection_log = []
 
                 # Layout detection logic
                 for layout in layouts:
@@ -183,12 +187,14 @@ async def scan_pdf(
                                 keyword_area_text_norm = normalize_text(keyword_area_text)
                                 
                                 if keyword_norm not in keyword_area_text_norm:
+                                    detection_log.append(f"FAILED: Layout '{layout.name}' - Keyword '{layout.keyword}' found in page but NOT in specified area.")
                                     continue # Keyword not found in specific area, skip this layout
                                 
                                 # Store the actual text found in the keyword area for verification
                                 found_keyword_text = keyword_area_text.strip()
                                 
                             except Exception:
+                                detection_log.append(f"ERROR: Layout '{layout.name}' - Failed to crop keyword area.")
                                 continue # Error cropping, skip
                         
                         detected_layout = layout.name
@@ -211,11 +217,18 @@ async def scan_pdf(
                                 extracted_name = remove_whitespace(extracted_name) # Ensure filename has no spaces
                             except Exception:
                                 extracted_name = "" # Fallback
+                        
+                        # Add success log and break
+                        detection_log.append(f"SUCCESS: Layout '{layout.name}' matched. Found text: '{found_keyword_text}'")
                         break
+                    else:
+                        # Log failure for this layout
+                        detection_log.append(f"FAILED: Layout '{layout.name}' - Keyword '{layout.keyword}' not found in page text.")
                 
                 # Default behavior if no layout detected or text extraction failed
                 if detected_layout == "Unknown":
                    extracted_name = ""  # Force empty name for unknown layouts
+                   detection_log.append("No layout matched.")
 
                 results.append({
                     "page_number": i + 1,
@@ -225,7 +238,8 @@ async def scan_pdf(
                     "layout_name": detected_layout,
                     "confirmed_name": extracted_name,
                     "should_merge": False, # Default to false
-                    "found_keyword_text": found_keyword_text
+                    "found_keyword_text": found_keyword_text,
+                    "detection_log": detection_log
                 })
                 
     except Exception as e:
