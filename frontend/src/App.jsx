@@ -679,10 +679,10 @@ function App() {
                                                     type="text" 
                                                     value={result.confirmed_name}
                                                     onChange={(e) => handleResultChange(index, 'confirmed_name', e.target.value)}
-                                                    placeholder={!result.confirmed_name ? "※必須項目です" : ""}
+                                                    placeholder={result.is_output_target && !result.confirmed_name ? "※必須項目です" : ""}
                                                     className={cn(
                                                         "w-full rounded px-3 py-1.5 focus:outline-none focus:ring-2 transition-all font-medium",
-                                                        !result.confirmed_name 
+                                                        result.is_output_target && !result.confirmed_name 
                                                             ? "bg-red-50 border border-red-300 text-slate-900 focus:ring-red-200 focus:border-red-500 placeholder:text-red-400" 
                                                             : "bg-slate-50 border border-slate-200 text-slate-700 focus:ring-indigo-500/20 focus:border-indigo-500"
                                                     )}

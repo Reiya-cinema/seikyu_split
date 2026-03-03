@@ -37,19 +37,9 @@ def get_db():
         db.close()
 
 def clean_text(text: str) -> str:
-    """Removes CIDs and other noise from text, handles whitespace for filenames."""
+    """Handles whitespace for filenames, keeping original text as much as possible."""
     if not text:
         return ""
-    
-    # Replace known faulty CIDs
-    # (cid:16126) -> R (Example provided by user)
-    text = text.replace("(cid:16126)", "R")
-    
-    # Generic CID removal (if any other remains, maybe replace with '?' or ''?)
-    # CID usually looks like (cid:xxxx)
-    import re
-    text = re.sub(r'\(cid:\d+\)', '', text)
-    
     return text.strip()
 
 def normalize_text(text: str) -> str:
