@@ -1,11 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { Upload, FileText, CheckCircle, Split, Settings, List, Plus, Save, Trash2, ArrowRight, Loader2, AlertCircle, Eye, X, RotateCcw } from 'lucide-react';
-import { cn } from './lib/utils';
+import { clsx } from "clsx";
+import { twMerge } from "tailwind-merge";
 import * as Tabs from '@radix-ui/react-tabs';
 import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
+
+// Utility function inline to avoid import issues in build
+function cn(...inputs) {
+  return twMerge(clsx(inputs));
+}
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
