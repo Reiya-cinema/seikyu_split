@@ -117,10 +117,34 @@ function App() {
       const res = await axios.post(`${API_BASE_URL}/api/scan`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
-      const processedData = res.data.map(item => ({
+      
+      let processedData = res.data.map(item => ({
         ...item,
-        is_output_target: true
+        is_output_target: true,
+        should_merge: false
       }));
+
+      // Sort by extracted_text (filename)
+      processedData.sort((a, b) => {
+          const textA = (a.extracted_text || "").toString();
+          const textB = (b.extracted_text || "").toString();
+          if (textA === textB) {
+              return a.page_number - b.page_number; // Keep pages in order for same file
+          }
+          return textA.localeCompare(textB, 'ja');
+      });
+
+      // Mark duplicates for merge automatically
+      // Iterate from second item
+      for (let i = 1; i < processedData.length; i++) {
+          const prev = processedData[i-1];
+          const curr = processedData[i];
+          // If current has a filename and matches previous, set merge flag
+          if (curr.extracted_text && prev.extracted_text === curr.extracted_text) {
+              curr.should_merge = true;
+          }
+      }
+
       setScanResults(processedData);
       setCurrentStep(3); // Go to Output step
     } catch (err) {

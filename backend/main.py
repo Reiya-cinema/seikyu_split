@@ -271,22 +271,26 @@ async def execute_split(
         groups = []
         current_group = []
         
-        # Sort items by page number just in case
-        items.sort(key=lambda x: x['page_number'])
+        # Sort items by page number just in case - REMOVED to allow custom ordering from frontend
+        # items.sort(key=lambda x: x['page_number'])
+
+        groups = []
+        current_group = None # Initialize as None to handle first item logic better
 
         for item in items:
             page_index = item['page_number'] - 1 # 0-based index for PdfReader
             
-            if not item['should_merge'] or not groups: # If not merge or first item
+            # Logic: If merge is true AND we have a current group, append.
+            # Otherwise start new group.
+            if item.get('should_merge', False) and groups:
+                groups[-1]['pages'].append(page_index)
+            else:
                  # Start new group
                  current_group = {
-                     "name": item['confirmed_name'],
+                     "name": item.get('confirmed_name', 'Unknown'),
                      "pages": [page_index]
                  }
                  groups.append(current_group)
-            else:
-                # Merge with previous group
-                groups[-1]['pages'].append(page_index)
 
         # Create ZIP file in memory
         zip_buffer = io.BytesIO()
