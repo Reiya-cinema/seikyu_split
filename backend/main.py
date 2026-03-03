@@ -36,12 +36,34 @@ def get_db():
     finally:
         db.close()
 
+def clean_text(text: str) -> str:
+    """Removes CIDs and other noise from text, handles whitespace for filenames."""
+    if not text:
+        return ""
+    
+    # Replace known faulty CIDs
+    # (cid:16126) -> R (Example provided by user)
+    text = text.replace("(cid:16126)", "R")
+    
+    # Generic CID removal (if any other remains, maybe replace with '?' or ''?)
+    # CID usually looks like (cid:xxxx)
+    import re
+    text = re.sub(r'\(cid:\d+\)', '', text)
+    
+    return text.strip()
+
 def normalize_text(text: str) -> str:
     """Removes all whitespace characters from text for loose matching."""
     if not text:
         return ""
     # Remove space, tab, newline, carriage return, full-width space
     return text.translate(str.maketrans('', '', ' \t\n\r\u3000'))
+
+def remove_whitespace(text: str) -> str:
+    """Removes all whitespace for filename usage."""
+    if not text:
+        return ""
+    return "".join(text.split())
 
 # Models
 class ScanResultItem(BaseModel):
@@ -97,7 +119,8 @@ async def extract_text_preview(
             
             try:
                 cropped_page = page.crop(bbox=area)
-                extracted_text = cropped_page.extract_text() or ""
+                extracted_text_raw = cropped_page.extract_text() or ""
+                extracted_text = clean_text(extracted_text_raw)
             except ValueError:
                 # This usually happens if the crop area is completely outside the page bounds
                 extracted_text = "指定範囲がページ外です"
@@ -193,7 +216,9 @@ async def scan_pdf(
                             )
                             try:
                                 cropped_page = page.crop(area)
-                                extracted_name = cropped_page.extract_text()
+                                extracted_name_raw = cropped_page.extract_text() or ""
+                                extracted_name = clean_text(extracted_name_raw)
+                                extracted_name = remove_whitespace(extracted_name) # Ensure filename has no spaces
                             except Exception:
                                 extracted_name = "" # Fallback
                         break
@@ -204,9 +229,11 @@ async def scan_pdf(
 
                 results.append({
                     "page_number": i + 1,
-                    "extracted_text": extracted_name.strip(),
+                    # extracted_text (for display/reference) can have spaces if desired, but user asked for "filename" space removal.
+                    # Confirmed name is the one used for output filename.
+                    "extracted_text": extracted_name, 
                     "layout_name": detected_layout,
-                    "confirmed_name": extracted_name.strip(),
+                    "confirmed_name": extracted_name,
                     "should_merge": False, # Default to false
                     "found_keyword_text": found_keyword_text
                 })
