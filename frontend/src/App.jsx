@@ -431,13 +431,11 @@ function App() {
             <Split className="w-5 h-5" />
           </div>
           <span className="text-xl font-bold bg-gradient-to-r from-indigo-700 to-indigo-500 bg-clip-text text-transparent">
-            BillSplit Pro
+            pdfファイル分割
           </span>
         </div>
         <div className="flex items-center gap-4 text-sm text-slate-500">
             {isProcessing && <div className="flex items-center gap-2 text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full"><Loader2 className="w-4 h-4 animate-spin" /> Processing...</div>}
-          <span>Enterprise Edition</span>
-          <div className="w-8 h-8 rounded-full bg-slate-200 border-2 border-white shadow-sm"></div>
         </div>
       </nav>
 
