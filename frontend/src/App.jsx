@@ -495,30 +495,30 @@ function App() {
   return (
     <div className={cn(
         "min-h-screen font-sans selection:bg-indigo-100 selection:text-indigo-900 border-t-8",
-        isStaging ? "bg-orange-50/30 border-orange-500" : "bg-slate-50 border-indigo-600"
+        isStaging ? "bg-red-50 border-red-600" : "bg-slate-50 border-indigo-600"
     )}>
       
       {/* Navbar */}
       <nav className={cn(
-        "bg-white border-b px-8 py-4 flex items-center justify-between shadow-sm sticky top-0 z-10",
-        isStaging ? "border-orange-200" : "border-slate-200"
+        "border-b px-8 py-4 flex items-center justify-between shadow-sm sticky top-0 z-10",
+        isStaging ? "bg-red-600 border-red-700 text-white" : "bg-white border-slate-200"
       )}>
         <div className="flex items-center gap-2">
           <div className={cn(
-            "text-white p-1.5 rounded-lg",
-            isStaging ? "bg-orange-500" : "bg-indigo-600"
+            "p-1.5 rounded-lg",
+            isStaging ? "bg-white text-red-600" : "bg-indigo-600 text-white"
           )}>
             <Split className="w-5 h-5" />
           </div>
           <span className={cn(
-            "text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r",
-            isStaging ? "from-orange-600 to-amber-500" : "from-indigo-700 to-indigo-500"
+            "text-xl font-bold",
+            isStaging ? "text-white" : "bg-clip-text text-transparent bg-gradient-to-r from-indigo-700 to-indigo-500"
           )}>
             {isStaging ? "pdfファイル分割 (Staging)" : "pdfファイル分割"}
           </span>
         </div>
-        <div className="flex items-center gap-4 text-sm text-slate-500">
-            {isProcessing && <div className="flex items-center gap-2 text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full"><Loader2 className="w-4 h-4 animate-spin" /> Processing...</div>}
+        <div className={cn("flex items-center gap-4 text-sm", isStaging ? "text-red-100" : "text-slate-500")}>
+            {isProcessing && <div className={cn("flex items-center gap-2 px-3 py-1 rounded-full", isStaging ? "bg-white/20 text-white" : "text-indigo-600 bg-indigo-50")}><Loader2 className="w-4 h-4 animate-spin" /> Processing...</div>}
         </div>
       </nav>
 
