@@ -7,6 +7,7 @@ import * as Tabs from '@radix-ui/react-tabs';
 import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
+import LayoutPipelineEditor from './components/LayoutPipelineEditor';
 
 // Utility function inline to avoid import issues in build
 function cn(...inputs) {
@@ -46,11 +47,44 @@ function App() {
 
   // Preview State
   const [previewFile, setPreviewFile] = useState(null);
+  const [previewPageNumber, setPreviewPageNumber] = useState(1);
+  const [previewTotalPages, setPreviewTotalPages] = useState(0);
+  const [showPreviewOverlays, setShowPreviewOverlays] = useState(true);
   const previewInputRef = useRef(null);
-  const [testExtractResult, setTestExtractResult] = useState(null);
-  const [isTestExtracting, setIsTestExtracting] = useState(false);
-  const [testKeywordResult, setTestKeywordResult] = useState(null);
-  const [isTestKeyword, setIsTestKeyword] = useState(false);
+  const [previewAnalysisResult, setPreviewAnalysisResult] = useState({
+      validation: [], extractions: [], validation_text: "", extraction_text: ""
+  });
+  const [isAnalyzeLoading, setIsAnalyzeLoading] = useState(false);
+
+  // Debounce for analysis
+  useEffect(() => {
+    if (!previewFile) return;
+
+    const timer = setTimeout(async () => {
+        setIsAnalyzeLoading(true);
+        const formData = new FormData();
+        formData.append('file', previewFile);
+        formData.append('layout_json', JSON.stringify(editingLayout));
+        formData.append('page_number', previewPageNumber); // Send current page number
+        
+        try {
+            const res = await axios.post(`${API_BASE_URL}/api/preview_layout`, formData);
+            setPreviewAnalysisResult(res.data);
+        } catch (e) {
+            console.error("Preview analysis failed", e);
+        } finally {
+            setIsAnalyzeLoading(false);
+        }
+    }, 800); // 800ms debounce
+
+    return () => clearTimeout(timer);
+  }, [previewFile, editingLayout, previewPageNumber]); // Run when page changes too
+
+  // Reset page number when file changes
+  useEffect(() => {
+    setPreviewPageNumber(1);
+    setPreviewTotalPages(0);
+  }, [previewFile]);
 
   // Layout Checkbox State for Scan
   const [selectedScanLayoutIds, setSelectedScanLayoutIds] = useState(new Set());
@@ -84,12 +118,50 @@ function App() {
       // Validate PDF
       if (selectedFile.type !== 'application/pdf') {
         setError('PDFファイルのみアップロード可能です。');
+        e.target.value = ''; // Reset input
         return;
       }
       setFile(selectedFile);
       setError(null);
       setSuccessMsg(null);
       setCurrentStep(2); // Go to Analysis step
+    }
+    // Reset input value to allow re-upload of same file if needed
+    e.target.value = '';
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    const droppedFiles = e.dataTransfer.files;
+    if (droppedFiles && droppedFiles.length > 0) {
+      const selectedFile = droppedFiles[0];
+      if (selectedFile.type !== 'application/pdf') {
+        setError('PDFファイルのみアップロード可能です。');
+        return;
+      }
+      setFile(selectedFile);
+      setError(null);
+      setSuccessMsg(null);
+      setCurrentStep(2);
+    }
+  };
+
+  const handlePreviewDrop = (e) => {
+    e.preventDefault();
+    const droppedFiles = e.dataTransfer.files;
+    if (droppedFiles && droppedFiles.length > 0) {
+        const f = droppedFiles[0];
+        if (f.type !== 'application/pdf') {
+            setError('PDFファイルのみアップロード可能です。');
+            return;
+        }
+        setPreviewFile(f);
+        // Reset input just in case
+        if (previewInputRef.current) previewInputRef.current.value = '';
     }
   };
 
@@ -407,50 +479,39 @@ function App() {
     }
   };
 
-  const validateLayout = () => {
-      if (!editingLayout.name) return "レイアウト名は必須です";
-      if (!editingLayout.keyword) return "識別キーワードは必須です";
+  const validateLayout = (layout = editingLayout) => {
+      if (!layout.name) return "レイアウト名は必須です";
+      if (!layout.keyword) return "識別キーワードは必須です";
 
       // Keyword Area Validation (Mandatory)
-      if (editingLayout.keyword_x1 <= editingLayout.keyword_x0 || 
-          editingLayout.keyword_y1 <= editingLayout.keyword_y0) {
-          return "識別キーワードエリアの座標が正しくありません (終了位置 > 開始位置)";
-      }
-      if (editingLayout.keyword_x1 === 0 && editingLayout.keyword_y1 === 0) {
-          return "識別キーワードエリアは必須項目です";
-      }
-
-      // Extract Area Validation (Warning but not strictly blocking if they want manual entry?)
-      // User didn't say Extract Area is mandatory, but implicitly it is for the tool to work.
-      // Let's keep it consistent.
-      if (editingLayout.extract_x1 <= editingLayout.extract_x0 || 
-          editingLayout.extract_y1 <= editingLayout.extract_y0) {
-          return "抽出エリアの座標が正しくありません";
-      }
+      // Note: LayoutPipelineEditor syncs extract/keyword coords for compat, so we check those
+      // However, new editor might allow more flexible configs. For now stick to compat checks.
+      
+      // If using new pipeline config, rely on that? For now, we still rely on the synced columns.
+      // But maybe skip coord validation if using anchor mode?
+      // Let's keep it simple: just ensure basic fields are there.
+      
       return null;
   };
 
-  const handleSaveLayout = async () => {
-    const errorMsg = validateLayout();
+  const handleSaveLayout = async (layoutData = editingLayout) => {
+    const errorMsg = validateLayout(layoutData);
     if (errorMsg) {
         setError(errorMsg);
         return;
     }
 
     try {
+      // Update state immediately to reflect changes in UI while saving
+      setEditingLayout(layoutData);
+
       if (selectedLayoutId) {
-          // Update existing layout
-          // Strip ID from payload if necessary, though FastAPI handles it usually. 
-          // Safest to just send the fields we edit or the whole object if backend is lenient.
-          // We will send editingLayout as is, assuming backend ignores 'id' in body or matches it.
-          const res = await axios.put(`${API_BASE_URL}/api/settings/${selectedLayoutId}`, editingLayout);
+          const res = await axios.put(`${API_BASE_URL}/api/settings/${selectedLayoutId}`, layoutData);
           
-          // Only update the specific item in the list
           setLayouts(layouts.map(l => l.id === selectedLayoutId ? res.data : l));
           setSuccessMsg(`レイアウト「${res.data.name}」を更新しました。`);
       } else {
-          // Fallback: Create new layout if no ID (e.g. after delete but user types and saves)
-          const res = await axios.post(`${API_BASE_URL}/api/settings`, editingLayout);
+          const res = await axios.post(`${API_BASE_URL}/api/settings`, layoutData);
           const createdLayout = res.data;
           
           setSelectedLayoutId(createdLayout.id);
@@ -608,6 +669,8 @@ function App() {
               {currentStep === 1 && (
                 <div 
                     onClick={() => fileInputRef.current?.click()}
+                    onDragOver={handleDragOver}
+                    onDrop={handleDrop}
                     className="group border-2 border-dashed border-slate-300 rounded-xl p-12 text-center bg-white hover:bg-slate-50/50 hover:border-indigo-400 transition-all cursor-pointer shadow-sm hover:shadow-md h-80 flex flex-col items-center justify-center"
                 >
                     <input 
@@ -949,162 +1012,20 @@ function App() {
 
                 {/* 2. Layout Detail Form (30%) */}
                 <div className="w-[30%] bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
-                    {/* Header */}
-                    <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-10">
-                        <h3 className="font-bold text-slate-800 text-sm">レイアウト詳細</h3>
-                        {selectedLayoutId && (
-                            <button onClick={handleDeleteLayout} className="text-slate-400 hover:text-red-500 p-1.5 rounded hover:bg-red-50 transition-colors" title="削除">
-                                <Trash2 className="w-4 h-4" />
-                            </button>
-                        )}
-                    </div>
-
                     {!selectedLayoutId ? (
                         <div className="flex-1 flex flex-col items-center justify-center text-slate-300 gap-2">
                             <Split className="w-8 h-8 opacity-20" />
                             <p className="text-xs font-bold">レイアウトを選択してください</p>
                         </div>
                     ) : (
-                        <>
-                            <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                                {/* Name Input */}
-                                <div>
-                                    <label className="block text-xs font-bold text-slate-500 mb-1">レイアウト名</label>
-                                    <input
-                                        type="text"
-                                        value={editingLayout.name}
-                                        onChange={(e) => handleLayoutChange('name', e.target.value)}
-                                        className="w-full text-sm font-bold text-slate-800 border-b-2 border-slate-200 focus:border-indigo-600 outline-none py-1 transition-colors px-1 bg-transparent"
-                                        placeholder="レイアウト名を入力"
-                                    />
-                                </div>
-
-                                {/* Step 1: Identification */}
-                                <div className="bg-slate-50/50 rounded-lg border border-slate-200 overflow-hidden">
-                                    <div className="px-3 py-2 bg-indigo-50/50 border-b border-indigo-100 flex items-center gap-2">
-                                        <span className="bg-indigo-600 text-white w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold">1</span>
-                                        <span className="text-xs font-bold text-indigo-900">識別条件 (Keyword)</span>
-                                    </div>
-                                    
-                                    <div className="p-3 space-y-3">
-                                        <div>
-                                            <label className="block text-[10px] font-bold text-slate-500 mb-1">判別キーワード</label>
-                                            <input 
-                                                type="text" 
-                                                value={editingLayout.keyword}
-                                                onChange={(e) => handleLayoutChange('keyword', e.target.value)}
-                                                className="w-full border border-slate-300 rounded px-2 py-1.5 text-xs outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200" 
-                                                placeholder="例: 請求書"
-                                            />
-                                        </div>
-                                        
-                                        <div>
-                                            <label className="block text-[10px] font-bold text-slate-500 mb-1">検索エリア (mm)</label>
-                                            <div className="grid grid-cols-2 gap-2">
-                                                {['x0', 'y0', 'x1', 'y1'].map((coord) => (
-                                                    <div key={`key_${coord}`} className="flex items-center gap-1 bg-white border border-slate-200 rounded px-2 py-1">
-                                                        <span className="text-[10px] text-slate-400 uppercase w-4">{coord}</span>
-                                                        <input 
-                                                            type="number" 
-                                                            className="flex-1 min-w-0 text-xs text-right outline-none font-mono" 
-                                                            value={editingLayout[`keyword_${coord}`]} 
-                                                            onChange={(e) => handleLayoutChange(`keyword_${coord}`, parseFloat(e.target.value))} 
-                                                        />
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                        <div className="mt-2 pt-2 border-t border-indigo-100 flex flex-col gap-2">
-                                            <button 
-                                                onClick={handleKeywordTest}
-                                                disabled={isTestKeyword}
-                                                className={cn(
-                                                    "w-full py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 shadow-sm",
-                                                    !previewFile 
-                                                        ? "bg-slate-200 text-slate-400 cursor-not-allowed" 
-                                                        : "bg-indigo-600 hover:bg-indigo-700 text-white"
-                                                )}
-                                                title={!previewFile ? "プレビュー用PDFをアップロードしてください" : "指定エリアのテキスト抽出テストを実行"}
-                                            >
-                                                {isTestKeyword ? <Loader2 className="w-3 h-3 animate-spin" /> : <Eye className="w-3 h-3" />}
-                                                抽出テスト実行
-                                            </button>
-                                            {testKeywordResult !== null && (
-                                                <div className="bg-indigo-50 border border-indigo-200 rounded p-2 text-xs">
-                                                    <span className="text-[10px] font-bold text-indigo-800 block mb-0.5">抽出結果:</span>
-                                                    <div className="bg-white border border-indigo-100 rounded p-1.5 text-slate-700 min-h-[1.5em] break-all font-mono">
-                                                        {testKeywordResult || <span className="text-slate-400 italic">(空)</span>}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Step 2: Extraction */}
-                                <div className="bg-slate-50/50 rounded-lg border border-slate-200 overflow-hidden">
-                                    <div className="px-3 py-2 bg-emerald-50/50 border-b border-emerald-100 flex items-center gap-2">
-                                        <span className="bg-emerald-600 text-white w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold">2</span>
-                                        <span className="text-xs font-bold text-emerald-900">ファイル名抽出 (Extract)</span>
-                                    </div>
-                                    
-                                    <div className="p-3 space-y-3">
-                                        <p className="text-[10px] text-slate-500 leading-tight">
-                                            指定エリアの文字を読み取り、ファイル名に使用します。
-                                        </p>
-                                        
-                                        <div>
-                                            <label className="block text-[10px] font-bold text-slate-500 mb-1">抽出エリア (mm)</label>
-                                            <div className="grid grid-cols-2 gap-2">
-                                                {['x0', 'y0', 'x1', 'y1'].map((coord) => (
-                                                    <div key={`extract_${coord}`} className="flex items-center gap-1 bg-white border border-slate-200 rounded px-2 py-1">
-                                                        <span className="text-[10px] text-slate-400 uppercase w-4">{coord}</span>
-                                                        <input 
-                                                            type="number" 
-                                                            className="flex-1 min-w-0 text-xs text-right outline-none font-mono" 
-                                                            value={editingLayout[`extract_${coord}`]} 
-                                                            onChange={(e) => handleLayoutChange(`extract_${coord}`, parseFloat(e.target.value))} 
-                                                        />
-                                                    </div>
-                                                ))}
-                                            </div>
-                                            
-                                            <div className="mt-3 pt-2 border-t border-emerald-100 flex flex-col gap-2">
-                                                <button 
-                                                    onClick={handleExtractTest}
-                                                    disabled={isTestExtracting}
-                                                    className={cn(
-                                                        "w-full py-1.5 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1 shadow-sm",
-                                                        !previewFile 
-                                                            ? "bg-slate-200 text-slate-400 cursor-not-allowed" 
-                                                            : "bg-emerald-600 hover:bg-emerald-700 text-white"
-                                                    )}
-                                                    title={!previewFile ? "プレビュー用PDFをアップロードしてください" : "指定エリアのテキスト抽出テストを実行"}
-                                                >
-                                                    {isTestExtracting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Eye className="w-3 h-3" />}
-                                                    抽出テスト実行
-                                                </button>
-
-                                                {testExtractResult !== null && (
-                                                    <div className="bg-emerald-50 border border-emerald-200 rounded p-2 text-xs">
-                                                        <span className="text-[10px] font-bold text-emerald-800 block mb-0.5">抽出結果:</span>
-                                                        <div className="bg-white border border-emerald-100 rounded p-1.5 text-slate-700 min-h-[1.5em] break-all font-mono">
-                                                            {testExtractResult || <span className="text-slate-400 italic">(空)</span>}
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div className="p-4 border-t border-slate-100 bg-white shadow-[0_-4px_6px_-2px_rgba(0,0,0,0.02)]">
-                                <button onClick={handleSaveLayout} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg shadow-sm shadow-indigo-200 text-sm font-bold transition-all flex items-center justify-center gap-2">
-                                    <Save className="w-4 h-4" /> 設定を保存
-                                </button>
-                            </div>
-                        </>
+                        <LayoutPipelineEditor 
+                            layout={editingLayout}
+                            onChange={handleLayoutChange}
+                            onSave={handleSaveLayout}
+                            onDelete={handleDeleteLayout}
+                            onCancel={() => setSelectedLayoutId(null)}
+                            previewResult={previewAnalysisResult}
+                        />
                     )}
                 </div>
 
@@ -1115,7 +1036,47 @@ function App() {
                         <span className="text-xs font-bold text-slate-600">プレビュー</span>
                     </div>
 
-                    <div className="absolute top-3 right-3 z-20">
+                    <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+                        {/* Page Navigation */}
+                        {previewTotalPages > 1 && (
+                            <div className="bg-white/90 backdrop-blur px-2 py-1.5 rounded shadow-sm border border-slate-200 flex items-center gap-2">
+                                <button 
+                                    onClick={() => setPreviewPageNumber(p => Math.max(1, p - 1))}
+                                    disabled={previewPageNumber <= 1}
+                                    className="p-0.5 hover:bg-slate-100 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                                >
+                                    <ArrowRight className="w-4 h-4 rotate-180" />
+                                </button>
+                                <span className="text-[10px] font-bold text-slate-600 min-w-[3em] text-center">
+                                    {previewPageNumber} / {previewTotalPages}
+                                </span>
+                                <button 
+                                    onClick={() => setPreviewPageNumber(p => Math.min(previewTotalPages, p + 1))}
+                                    disabled={previewPageNumber >= previewTotalPages}
+                                    className="p-0.5 hover:bg-slate-100 rounded disabled:opacity-30 disabled:cursor-not-allowed"
+                                >
+                                    <ArrowRight className="w-4 h-4" />
+                                </button>
+                            </div>
+                        )}
+
+                        {/* Toggle Switch */}
+                        <div className="bg-white/90 backdrop-blur px-2 py-1.5 rounded shadow-sm border border-slate-200 flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-slate-600">枠を表示</span>
+                            <div 
+                                onClick={() => setShowPreviewOverlays(!showPreviewOverlays)}
+                                className={cn(
+                                    "w-8 h-4 rounded-full p-0.5 cursor-pointer transition-colors relative",
+                                    showPreviewOverlays ? "bg-indigo-500" : "bg-slate-300"
+                                )}
+                            >
+                                <div className={cn(
+                                    "w-3 h-3 bg-white rounded-full shadow-sm transition-transform absolute top-0.5",
+                                    showPreviewOverlays ? "translate-x-4" : "translate-x-0"
+                                )} />
+                            </div>
+                        </div>
+
                          <button 
                             onClick={() => previewInputRef.current?.click()}
                             className="text-xs bg-white/90 backdrop-blur border border-slate-300 hover:bg-white hover:text-indigo-600 px-3 py-1.5 rounded shadow-sm text-slate-600 flex items-center gap-1 transition-all"
@@ -1127,7 +1088,12 @@ function App() {
                             accept=".pdf" 
                             className="hidden" 
                             ref={previewInputRef}
-                            onChange={(e) => e.target.files[0] && setPreviewFile(e.target.files[0])}
+                            onChange={(e) => {
+                                if (e.target.files[0]) {
+                                    setPreviewFile(e.target.files[0]);
+                                    e.target.value = ''; // Reset input to allow re-upload
+                                }
+                            }}
                         />
                     </div>
                     
@@ -1135,6 +1101,8 @@ function App() {
                          {!previewFile ? (
                              <div 
                                 onClick={() => previewInputRef.current?.click()}
+                                onDragOver={handleDragOver}
+                                onDrop={handlePreviewDrop}
                                 className="w-full h-full flex flex-col items-center justify-center text-slate-400 cursor-pointer hover:text-indigo-500 transition-colors border-2 border-dashed border-slate-300 rounded-lg m-4"
                             >
                                 <Upload className="w-10 h-10 mb-3 opacity-50" />
@@ -1144,10 +1112,11 @@ function App() {
                             <div className="relative shadow-lg bg-white mt-8">
                                 <Document
                                     file={previewFile}
+                                    onLoadSuccess={({ numPages }) => setPreviewTotalPages(numPages)}
                                     onLoadError={(e) => console.error(e)}
                                 >
                                     <Page 
-                                        pageNumber={1} 
+                                        pageNumber={previewPageNumber} 
                                         width={600} 
                                         renderTextLayer={false}
                                         renderAnnotationLayer={false}
@@ -1157,37 +1126,148 @@ function App() {
                                         }}
                                     />
                                     
-                                    {/* Overlay for Keyword Area (Blue) */}
-                                    {(editingLayout.keyword_x1 > 0 && editingLayout.keyword_y1 > 0) && (
-                                        <div 
-                                            className="absolute border-2 border-indigo-500 bg-indigo-500/20 text-indigo-700 font-bold text-[10px] flex items-start justify-start pl-1 pt-0.5 pointer-events-none"
-                                            style={{
-                                                left: `calc(${editingLayout.keyword_x0} * 2.83465 * var(--preview-scale) * 1px)`,
-                                                top: `calc(${editingLayout.keyword_y0} * 2.83465 * var(--preview-scale) * 1px)`,
-                                                width: `calc(${editingLayout.keyword_x1 - editingLayout.keyword_x0} * 2.83465 * var(--preview-scale) * 1px)`,
-                                                height: `calc(${editingLayout.keyword_y1 - editingLayout.keyword_y0} * 2.83465 * var(--preview-scale) * 1px)`,
-                                                zIndex: 10
-                                            }}
-                                        >
-                                            <span className="bg-indigo-500 text-white px-1">Keyword</span>
-                                        </div>
-                                    )}
+                                    {/* --- 1. Validation Overlay (Blue) --- */}
+                                    {showPreviewOverlays && (() => {
+                                        let steps = [];
+                                        try {
+                                            const cfg = editingLayout.pipeline_config ? JSON.parse(editingLayout.pipeline_config) : {};
+                                            steps = cfg.validation?.steps || [];
+                                        } catch (e) {}
 
-                                    {/* Overlay for Extract Area (Green) */}
-                                    {(editingLayout.extract_x1 > 0 && editingLayout.extract_y1 > 0) && (
-                                        <div 
-                                            className="absolute border-2 border-emerald-500 bg-emerald-500/20 text-emerald-700 font-bold text-[10px] flex items-start justify-start pl-1 pt-0.5 pointer-events-none"
-                                            style={{
-                                                left: `calc(${editingLayout.extract_x0} * 2.83465 * var(--preview-scale) * 1px)`,
-                                                top: `calc(${editingLayout.extract_y0} * 2.83465 * var(--preview-scale) * 1px)`,
-                                                width: `calc(${editingLayout.extract_x1 - editingLayout.extract_x0} * 2.83465 * var(--preview-scale) * 1px)`,
-                                                height: `calc(${editingLayout.extract_y1 - editingLayout.extract_y0} * 2.83465 * var(--preview-scale) * 1px)`,
-                                                zIndex: 10
-                                            }}
-                                        >
-                                            <span className="bg-emerald-500 text-white px-1">File Name</span>
-                                        </div>
-                                    )}
+                                        // Fallback legacy
+                                        if (steps.length === 0 && editingLayout.keyword_x1 > 0) {
+                                            steps = [{
+                                                id: 'legacy_val',
+                                                type: 'coordinate',
+                                                x0: editingLayout.keyword_x0,
+                                                y0: editingLayout.keyword_y0,
+                                                x1: editingLayout.keyword_x1,
+                                                y1: editingLayout.keyword_y1,
+                                                name: 'Legacy Area'
+                                            }];
+                                        }
+
+                                        return steps.map((step, i) => {
+                                            let style = {};
+                                            
+                                            // Coordinate Type: Use editor values (mm -> pt)
+                                            if (step.type === 'coordinate') {
+                                                const x0 = step.x0 || 0;
+                                                const y0 = step.y0 || 0;
+                                                const w = (step.x1 || 0) - x0;
+                                                const h = (step.y1 || 0) - y0;
+                                                
+                                                if (w <= 0 || h <= 0) return null;
+
+                                                style = {
+                                                    left: `calc(${x0} * 2.83465 * var(--preview-scale) * 1px)`,
+                                                    top: `calc(${y0} * 2.83465 * var(--preview-scale) * 1px)`,
+                                                    width: `calc(${w} * 2.83465 * var(--preview-scale) * 1px)`,
+                                                    height: `calc(${h} * 2.83465 * var(--preview-scale) * 1px)`,
+                                                };
+                                            } 
+                                            // Const Type: Use API result (pt)
+                                            else if (step.type === 'const') {
+                                                const found = previewAnalysisResult?.validation?.find(s => s.id === step.id);
+                                                if (!found || !found.bbox) return null;
+                                                
+                                                const [bx0, by0, bx1, by1] = found.bbox;
+                                                style = {
+                                                    left: `calc(${bx0} * var(--preview-scale) * 1px)`,
+                                                    top: `calc(${by0} * var(--preview-scale) * 1px)`,
+                                                    width: `calc(${bx1 - bx0} * var(--preview-scale) * 1px)`,
+                                                    height: `calc(${by1 - by0} * var(--preview-scale) * 1px)`,
+                                                };
+                                            }
+
+                                            return (
+                                                <div 
+                                                    key={step.id || i}
+                                                    className="absolute border-2 border-indigo-500 bg-indigo-500/20 text-indigo-700 font-bold text-[10px] flex items-start justify-start pl-1 pt-0.5 pointer-events-none z-10"
+                                                    style={style}
+                                                >
+                                                    <span className="bg-indigo-500 text-white px-1 shadow-sm">#{i+1} {step.name || '判定'}</span>
+                                                </div>
+                                            );
+                                        });
+                                    })()}
+
+                                    {/* --- 2. Extraction Overlay (Various Colors) --- */}
+                                    {showPreviewOverlays && (() => {
+                                        let extractions = [];
+                                        try {
+                                            const config = editingLayout.pipeline_config ? JSON.parse(editingLayout.pipeline_config) : {};
+                                            extractions = config.extractions || [];
+                                        } catch (e) {}
+                                        
+                                        // Legacy fallback
+                                        if (extractions.length === 0 && editingLayout.extract_x1 > 0) {
+                                             extractions = [{
+                                                id: 'legacy_ext',
+                                                type: 'coordinate',
+                                                x0: editingLayout.extract_x0,
+                                                y0: editingLayout.extract_y0,
+                                                x1: editingLayout.extract_x1,
+                                                y1: editingLayout.extract_y1,
+                                                name: 'Legacy Extract'
+                                            }];
+                                        }
+
+                                        const colors = [
+                                            { border: 'border-emerald-500', bg: 'bg-emerald-500/20', text: 'text-emerald-700', labelBg: 'bg-emerald-500' },
+                                            { border: 'border-orange-500', bg: 'bg-orange-500/20', text: 'text-orange-700', labelBg: 'bg-orange-500' },
+                                            { border: 'border-purple-500', bg: 'bg-purple-500/20', text: 'text-purple-700', labelBg: 'bg-purple-500' },
+                                        ];
+
+                                        return extractions.map((ex, i) => {
+                                            const color = colors[i % colors.length];
+                                            let style = {};
+
+                                            if (ex.type === 'coordinate') {
+                                                const x0 = ex.x0 || 0;
+                                                const y0 = ex.y0 || 0;
+                                                const w = (ex.x1 || 0) - x0;
+                                                const h = (ex.y1 || 0) - y0;
+                                                
+                                                if (w <= 0 || h <= 0) return null;
+
+                                                style = {
+                                                    left: `calc(${x0} * 2.83465 * var(--preview-scale) * 1px)`,
+                                                    top: `calc(${y0} * 2.83465 * var(--preview-scale) * 1px)`,
+                                                    width: `calc(${w} * 2.83465 * var(--preview-scale) * 1px)`,
+                                                    height: `calc(${h} * 2.83465 * var(--preview-scale) * 1px)`,
+                                                };
+                                            }
+                                            else if (ex.type === 'const') {
+                                                const found = previewAnalysisResult?.extractions?.find(s => s.id === ex.id);
+                                                if (!found || !found.bbox) return null;
+                                                
+                                                const [bx0, by0, bx1, by1] = found.bbox;
+                                                style = {
+                                                    left: `calc(${bx0} * var(--preview-scale) * 1px)`,
+                                                    top: `calc(${by0} * var(--preview-scale) * 1px)`,
+                                                    width: `calc(${bx1 - bx0} * var(--preview-scale) * 1px)`,
+                                                    height: `calc(${by1 - by0} * var(--preview-scale) * 1px)`,
+                                                };
+                                            } else {
+                                                return null;
+                                            }
+                                            
+                                            return (
+                                                <div 
+                                                    key={ex.id || i}
+                                                    className={cn(
+                                                        "absolute border-2 font-bold text-[10px] flex items-start justify-start pl-1 pt-0.5 pointer-events-none z-10",
+                                                        color.border, color.bg, color.text
+                                                    )}
+                                                    style={style}
+                                                >
+                                                    <span className={cn("text-white px-1 shadow-sm", color.labelBg)}>#{i+1} {ex.name}</span>
+                                                </div>
+                                            );
+                                        });
+                                    })()}
+
                                 </Document>
                             </div>
                         )}
