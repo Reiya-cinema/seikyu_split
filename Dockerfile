@@ -4,6 +4,8 @@ WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm ci
 COPY frontend/ ./
+ARG VITE_APP_ENV
+ENV VITE_APP_ENV=${VITE_APP_ENV}
 RUN npm run build
 
 # Stage 2: Setup Backend
