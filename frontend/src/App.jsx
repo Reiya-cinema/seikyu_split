@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Upload, FileText, CheckCircle, Split, Settings, List, Plus, Save, Trash2, ArrowRight, Loader2, AlertCircle, Eye, X, RotateCcw, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Upload, Download, FileText, CheckCircle, Split, Settings, List, Plus, Save, Trash2, ArrowRight, Loader2, AlertCircle, Eye, X, RotateCcw, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 import * as Tabs from '@radix-ui/react-tabs';
@@ -51,6 +51,7 @@ function App() {
   const [previewTotalPages, setPreviewTotalPages] = useState(0);
   const [showPreviewOverlays, setShowPreviewOverlays] = useState(true);
   const previewInputRef = useRef(null);
+  const importInputRef = useRef(null);
   const [previewAnalysisResult, setPreviewAnalysisResult] = useState({
       validation: [], extractions: [], validation_text: "", extraction_text: ""
   });
@@ -553,6 +554,47 @@ function App() {
       }
   };
 
+  const handleExportLayouts = () => {
+    if (layouts.length === 0) {
+        setError("エクスポートするレイアウトがありません。");
+        return;
+    }
+    const exportData = layouts.map(({ id, created_at, updated_at, ...rest }) => rest);
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `seikyu_split_layouts_${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportLayouts = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        if (!Array.isArray(data)) {
+            setError("インポートファイルの形式が正しくありません (リスト形式である必要があります)。");
+            return;
+        }
+
+        await axios.post(`${API_BASE_URL}/api/settings/import`, data);
+        await fetchLayouts();
+        setSuccessMsg(`${data.length} 件のレイアウトをインポートしました。`);
+        
+    } catch (err) {
+        console.error("Import failed", err);
+        setError("レイアウトのインポートに失敗しました。ファイル形式などを確認してください。");
+    } finally {
+        e.target.value = '';
+    }
+  };
+
   return (
     <div className={cn(
         "min-h-screen font-sans selection:bg-indigo-100 selection:text-indigo-900 border-t-8",
@@ -972,15 +1014,44 @@ function App() {
                 
                 {/* 1. Layout List (15%) */}
                 <div className="w-[15%] bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
-                    <div className="p-3 border-b border-slate-100 bg-slate-50/50">
-                        <h3 className="font-bold text-slate-700 text-xs text-center uppercase tracking-wide">登録済みリスト</h3>
+                    <div className="p-3 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+                        <h3 className="font-bold text-slate-700 text-xs uppercase tracking-wide">登録済みリスト</h3>
+                        <div className="flex gap-1">
+                            <button 
+                                onClick={() => importInputRef.current?.click()}
+                                className="p-1 hover:bg-slate-200 rounded text-slate-500 hover:text-indigo-600 transition-colors" 
+                                title="インポート"
+                            >
+                                <Upload className="w-3.5 h-3.5" />
+                            </button>
+                            <button 
+                                onClick={handleExportLayouts}
+                                className="p-1 hover:bg-slate-200 rounded text-slate-500 hover:text-indigo-600 transition-colors" 
+                                title="エクスポート"
+                            >
+                                <Download className="w-3.5 h-3.5" />
+                            </button>
+                            <input 
+                                type="file" 
+                                accept=".json" 
+                                className="hidden" 
+                                ref={importInputRef}
+                                onChange={handleImportLayouts}
+                            />
+                        </div>
                     </div>
                     
                     <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                         {layouts.length === 0 && (
+                             <div className="text-center py-8 text-slate-400 text-xs">
+                                 登録なし
+                             </div>
+                         )}
+
                          <div 
                              onClick={handleNewLayout}
                              className={cn(
-                                "w-full p-2 rounded-lg border cursor-pointer transition-all hover:bg-slate-50 text-center",
+                                "w-full p-2 rounded-lg border cursor-pointer transition-all hover:bg-slate-50 text-center min-h-[50px] flex items-center justify-center",
                                 selectedLayoutId === null 
                                     ? "bg-indigo-50 border-indigo-200 text-indigo-700 font-bold shadow-sm"
                                     : "bg-white border-slate-100 text-slate-600"

@@ -8,6 +8,7 @@ import io
 import json
 import zipfile
 import os
+import re
 import pdfplumber
 from pypdf import PdfReader, PdfWriter
 from pydantic import BaseModel
@@ -54,6 +55,109 @@ def remove_whitespace(text: str) -> str:
     if not text:
         return ""
     return "".join(text.split())
+
+def process_extracted_text(parts: List[str], options: dict) -> str:
+    separator = options.get('concat_separator', '_')
+    if separator is None: separator = ''
+
+    # Join
+    text = separator.join([p for p in parts if p])
+    
+    # Process
+    if options.get('remove_whitespace'):
+        text = "".join(text.split())
+        
+    if options.get('uppercase'):
+        text = text.upper()
+        
+    pattern = options.get('remove_pattern')
+    if pattern:
+        try:
+            text = re.sub(pattern, "", text)
+        except re.error:
+            pass # Invalid regex
+            
+    return text
+
+def extract_from_step(page, step: dict, scale: float = 2.83465):
+    """
+    Extracts text based on a single step configuration.
+    Returns a dict with 'text' and 'bbox' (if applicable).
+    bbox format: [x0, top, x1, bottom] in points (pdfplumber native)
+    """
+    step_type = step.get('type')
+    result = {"text": "", "bbox": None}
+    
+    if step_type == 'coordinate':
+        try:
+            x0 = float(step.get('x0', 0))
+            y0 = float(step.get('y0', 0))
+            x1 = float(step.get('x1', 0))
+            y1 = float(step.get('y1', 0))
+            
+            if x1 > x0 and y1 > y0:
+                area = (x0 * scale, y0 * scale, x1 * scale, y1 * scale)
+                cropped = page.crop(bbox=area)
+                result["text"] = (cropped.extract_text() or "").strip()
+                result["bbox"] = area
+                return result
+        except Exception:
+            pass
+
+    elif step_type == 'const':
+        val = step.get('value', '')
+        try:
+            offset = int(step.get('offset', 0))
+        except (ValueError, TypeError):
+            offset = 0
+
+        if not val:
+            return result
+
+        try:
+            # Use extract_words to get text elements in reading order
+            # x_tolerance and y_tolerance help group characters into words
+            words = page.extract_words(x_tolerance=3, y_tolerance=3)
+            
+            # Find the first word that contains the anchor text
+            anchor_idx = -1
+            for i, w in enumerate(words):
+                if val in w['text']:
+                    anchor_idx = i
+                    break
+            
+            # If anchor found, apply offset to the index
+            if anchor_idx != -1:
+                target_idx = anchor_idx + offset
+                
+                # Check boundaries
+                if 0 <= target_idx < len(words):
+                    target_word = words[target_idx]
+                    result["text"] = target_word['text']
+                    result["bbox"] = (
+                        target_word['x0'], 
+                        target_word['top'], 
+                        target_word['x1'], 
+                        target_word['bottom']
+                    )
+        except Exception:
+            pass
+
+    return result
+
+def extract_from_pipeline(page, pipeline_config: dict, scale: float = 2.83465) -> str:
+    extracted_parts = []
+    
+    extractions = pipeline_config.get('extractions', [])
+    if not extractions:
+        return ""
+        
+    for step in extractions:
+        # We only need the text part here for the main pipeline logic
+        res = extract_from_step(page, step, scale)
+        extracted_parts.append(res["text"])
+        
+    return process_extracted_text(extracted_parts, pipeline_config.get('processing', {}))
 
 # Models
 class ScanResultItem(BaseModel):
@@ -124,6 +228,126 @@ async def extract_text_preview(
 
     return {"text": extracted_text.strip()}
 
+@app.post("/api/preview_layout")
+async def preview_layout_analysis(
+    file: UploadFile = File(...),
+    layout_json: str = Form(...),
+    page_number: int = Form(1)
+):
+    try:
+        layout_data = json.loads(layout_json)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid layout JSON")
+
+    if not file.filename.endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="File must be a PDF")
+    
+    contents = await file.read()
+    pdf_file = io.BytesIO(contents)
+    
+    response = {
+        "validation": [],
+        "extractions": [],
+        "validation_text": "",
+        "extraction_text": ""
+    }
+    
+    try:
+        with pdfplumber.open(pdf_file) as pdf:
+            if not pdf.pages:
+                return response
+            
+            # Ensure page_number is within valid range
+            target_page_index = max(0, min(page_number - 1, len(pdf.pages) - 1))
+            page = pdf.pages[target_page_index]
+            
+            scale = 2.83465
+            
+            # --- Validation Steps Analysis ---
+            pipeline_config = {}
+            if layout_data.get('pipeline_config'):
+                try:
+                    pipeline_config = json.loads(layout_data['pipeline_config'])
+                except:
+                    pass
+            
+            # 1. Validation Steps
+            validation_steps = pipeline_config.get('validation', {}).get('steps', [])
+            val_texts = []
+            
+            if validation_steps:
+                for step in validation_steps:
+                    res = extract_from_step(page, step, scale)
+                    val_texts.append(res['text'])
+                    response['validation'].append({
+                        "id": step.get('id'),
+                        "bbox": res.get('bbox'), # [x0, top, x1, bottom]
+                        "text": res.get('text')
+                    })
+            else:
+                # Legacy Validation (Single Area)
+                kw_x0 = float(layout_data.get('keyword_x0', 0))
+                kw_x1 = float(layout_data.get('keyword_x1', 0))
+                if kw_x1 > kw_x0:
+                     # Simulate a step
+                     dummy_step = {
+                         "type": "coordinate",
+                         "x0": layout_data.get('keyword_x0'),
+                         "y0": layout_data.get('keyword_y0'),
+                         "x1": layout_data.get('keyword_x1'),
+                         "y1": layout_data.get('keyword_y1')
+                     }
+                     res = extract_from_step(page, dummy_step, scale)
+                     val_texts.append(res['text'])
+                     response['validation'].append({
+                        "id": "legacy_validation",
+                        "bbox": res.get('bbox'),
+                        "text": res.get('text')
+                    })
+            
+            response['validation_text'] = "".join(val_texts) # Simple join for preview
+
+            # 2. Extraction Steps
+            extraction_steps = pipeline_config.get('extractions', [])
+            ext_texts = []
+            
+            if extraction_steps:
+                for step in extraction_steps:
+                    res = extract_from_step(page, step, scale)
+                    ext_texts.append(res['text'])
+                    response['extractions'].append({
+                        "id": step.get('id'),
+                        "bbox": res.get('bbox'),
+                        "text": res.get('text')
+                    })
+            else:
+                # Legacy Extraction
+                ex_x0 = float(layout_data.get('extract_x0', 0))
+                ex_x1 = float(layout_data.get('extract_x1', 0))
+                if ex_x1 > ex_x0:
+                     dummy_step = {
+                         "type": "coordinate",
+                         "x0": layout_data.get('extract_x0'),
+                         "y0": layout_data.get('extract_y0'),
+                         "x1": layout_data.get('extract_x1'),
+                         "y1": layout_data.get('extract_y1')
+                     }
+                     res = extract_from_step(page, dummy_step, scale)
+                     ext_texts.append(res['text'])
+                     response['extractions'].append({
+                        "id": "legacy_extraction",
+                        "bbox": res.get('bbox'),
+                        "text": res.get('text')
+                    })
+            
+            # Use processing rules for final text
+            response['extraction_text'] = process_extracted_text(ext_texts, pipeline_config.get('processing', {}))
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error previewing layout: {str(e)}")
+        
+    return response
+
 @app.post("/api/scan")
 async def scan_pdf(
     file: UploadFile = File(...), 
@@ -144,13 +368,8 @@ async def scan_pdf(
             ids = [int(x) for x in layout_ids.split(",") if x.strip()]
             layouts = db.query(LayoutSetting).filter(LayoutSetting.id.in_(ids)).all()
         except ValueError:
-            # Fallback if parsing fails
             layouts = db.query(LayoutSetting).all()
     else:
-        # If no specific IDs provided (e.g. from older clients, though here it's coupled), default to all checking?
-        # Or maybe none? Let's default to all to be safe, but usually frontend sends empty string for none.
-        # If frontend sends empty string "", ids list is empty, query returns empty list. Correct.
-        # If frontend sends nothing (None), default to all.
         layouts = db.query(LayoutSetting).all()
 
     try:
@@ -169,76 +388,103 @@ async def scan_pdf(
                     if not keyword_norm:
                         continue
 
-                    # Check if keyword exists in the page text first (optimization)
-                    if keyword_norm in page_text_norm:
+                    # Optimization: Check if keyword exists in page text first
+                    if keyword_norm not in page_text_norm:
+                        continue
+
+                    # Parse Pipeline Config
+                    try:
+                        pipeline_cfg = json.loads(layout.pipeline_config or '{}')
+                    except Exception:
+                        pipeline_cfg = {}
+                    
+                    validation_steps = pipeline_cfg.get('validation', {}).get('steps', [])
+                    scale = 2.83465
+                    match_found = False
+                    found_text_sample = ""
+
+                    # 1. Validation via Steps (New)
+                    if validation_steps:
+                        # Use extraction logic to get text for validation
+                        # Use a temporary config that just joins text
+                        val_config = {
+                            'extractions': validation_steps,
+                            'processing': {'concat_separator': ''} 
+                        }
                         
-                        # If keyword area is defined, check specifically in that area
-                        if layout.keyword_x1 > 0 and layout.keyword_y1 > 0:
-                            # Convert mm to points
-                            scale = 2.83465
-                            area = (
-                                layout.keyword_x0 * scale,
-                                layout.keyword_y0 * scale,
-                                layout.keyword_x1 * scale,
-                                layout.keyword_y1 * scale
-                            )
-                            try:
-                                cropped_keyword_area = page.crop(area)
-                                keyword_area_text = cropped_keyword_area.extract_text() or ""
-                                keyword_area_text_norm = normalize_text(keyword_area_text)
-                                
-                                if keyword_norm not in keyword_area_text_norm:
-                                    detection_log.append(f"FAILED: Layout '{layout.name}' - Keyword '{layout.keyword}' found in page but NOT in specified area.")
-                                    continue # Keyword not found in specific area, skip this layout
-                                
-                                # Store the actual text found in the keyword area for verification
-                                found_keyword_text = keyword_area_text.strip()
-                                
-                            except Exception:
-                                detection_log.append(f"ERROR: Layout '{layout.name}' - Failed to crop keyword area.")
-                                continue # Error cropping, skip
-                        
-                        detected_layout = layout.name
-        
-                        # Extract name based on coordinates
-                        if layout.extract_x1 > 0 and layout.extract_y1 > 0:
-                            # Convert mm to points (1 mm = 2.83465 pt)
-                            scale = 2.83465
-                            # pdfplumber uses (x0, top, x1, bottom)
-                            area = (
-                                layout.extract_x0 * scale, 
-                                layout.extract_y0 * scale, 
-                                layout.extract_x1 * scale, 
-                                layout.extract_y1 * scale
-                            )
-                            try:
-                                cropped_page = page.crop(area)
-                                extracted_name_raw = cropped_page.extract_text() or ""
-                                extracted_name = clean_text(extracted_name_raw)
-                                extracted_name = remove_whitespace(extracted_name) # Ensure filename has no spaces
-                            except Exception:
-                                extracted_name = "" # Fallback
-                        
-                        # Add success log and break
-                        detection_log.append(f"SUCCESS: Layout '{layout.name}' matched. Found text: '{found_keyword_text}'")
-                        break
+                        try:
+                            extracted_val = extract_from_pipeline(page, val_config, scale)
+                            extracted_val_norm = normalize_text(extracted_val)
+                            
+                            if keyword_norm in extracted_val_norm:
+                                match_found = True
+                                found_text_sample = extracted_val.strip()
+                        except Exception:
+                            pass
+
+                    # 2. Validation via Coordinates (Legacy)
+                    elif layout.keyword_x1 > 0 and layout.keyword_y1 > 0:
+                        area = (
+                            layout.keyword_x0 * scale,
+                            layout.keyword_y0 * scale,
+                            layout.keyword_x1 * scale,
+                            layout.keyword_y1 * scale
+                        )
+                        try:
+                            cropped = page.crop(area)
+                            extracted_val = cropped.extract_text() or ""
+                            extracted_val_norm = normalize_text(extracted_val)
+                            
+                            if keyword_norm in extracted_val_norm:
+                                match_found = True
+                                found_text_sample = extracted_val.strip()
+                        except Exception:
+                            pass
+
+                    # 3. Text Match (Fallback / No-Coordinates)
                     else:
-                        # Log failure for this layout
-                        detection_log.append(f"FAILED: Layout '{layout.name}' - Keyword '{layout.keyword}' not found in page text.")
+                        # Since we already checked page_text_norm, this is a match
+                        match_found = True
+                        found_text_sample = layout.keyword 
+
+                    if match_found:
+                        detected_layout = layout.name
+                        found_keyword_text = found_text_sample
+                        
+                        # Perform Extraction (Filename)
+                        extraction_steps = pipeline_cfg.get('extractions', [])
+                        
+                        if extraction_steps:
+                             extracted_name = extract_from_pipeline(page, pipeline_cfg, scale)
+                        
+                        # Legacy extraction fallback
+                        elif layout.extract_x1 > 0 and layout.extract_y1 > 0:
+                             area = (
+                                 layout.extract_x0 * scale, 
+                                 layout.extract_y0 * scale, 
+                                 layout.extract_x1 * scale, 
+                                 layout.extract_y1 * scale
+                             )
+                             try:
+                                 extracted_name = page.crop(area).extract_text() or ""
+                             except:
+                                 extracted_name = ""
+                        
+                        extracted_name = clean_text(extracted_name)
+                        extracted_name = remove_whitespace(extracted_name)
+                        
+                        detection_log.append(f"SUCCESS: Layout '{layout.name}' matched. Found text: '{found_keyword_text}'")
+                        break # Stop checking other layouts
                 
-                # Default behavior if no layout detected or text extraction failed
                 if detected_layout == "Unknown":
-                   extracted_name = ""  # Force empty name for unknown layouts
                    detection_log.append("No layout matched.")
 
                 results.append({
                     "page_number": i + 1,
-                    # extracted_text (for display/reference) can have spaces if desired, but user asked for "filename" space removal.
-                    # Confirmed name is the one used for output filename.
                     "extracted_text": extracted_name, 
                     "layout_name": detected_layout,
                     "confirmed_name": extracted_name,
-                    "should_merge": False, # Default to false
+                    "should_merge": False,
                     "found_keyword_text": found_keyword_text,
                     "detection_log": detection_log
                 })
@@ -336,6 +582,7 @@ class LayoutCreate(BaseModel):
     extract_y0: float = 0.0
     extract_x1: float = 0.0
     extract_y1: float = 0.0
+    pipeline_config: Optional[str] = "{}"
 
 @app.post("/api/settings")
 def create_setting(setting: LayoutCreate, db: Session = Depends(get_db)):
@@ -361,6 +608,21 @@ def update_setting(setting_id: int, setting: LayoutCreate, db: Session = Depends
 @app.get("/api/settings")
 def get_settings(db: Session = Depends(get_db)):
     return db.query(LayoutSetting).all()
+
+@app.post("/api/settings/import")
+def import_settings(settings: List[LayoutCreate], db: Session = Depends(get_db)):
+    added_settings = []
+    try:
+        for s in settings:
+            db_setting = LayoutSetting(**s.dict())
+            db.add(db_setting)
+            db.commit()
+            db.refresh(db_setting)
+            added_settings.append(db_setting)
+        return added_settings
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
 
 @app.delete("/api/settings/{setting_id}")
 def delete_setting(setting_id: int, db: Session = Depends(get_db)):

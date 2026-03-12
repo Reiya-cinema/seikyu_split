@@ -40,6 +40,23 @@ class LayoutSetting(Base):
     extract_y0 = Column(Float, default=0.0)
     extract_x1 = Column(Float, default=0.0)
     extract_y1 = Column(Float, default=0.0)
+    
+    # New architecture: Dynamic Pipeline Configuration (JSON String)
+    # Allows multiple extraction points, anchor-based extraction, and post-processing steps.
+    pipeline_config = Column(String, default="{}")
 
 def init_db():
+    # Simple migration logic for SQLite
+    # Check if 'pipeline_config' column exists, if not add it.
+    from sqlalchemy import inspect, text
+    inspector = inspect(engine)
+    
+    # Create tables if they don't exist
     Base.metadata.create_all(bind=engine)
+    
+    # Check for migration
+    with engine.connect() as conn:
+        columns = [col['name'] for col in inspector.get_columns('layout_settings')]
+        if 'pipeline_config' not in columns:
+            print("Migrating database: Adding pipeline_config column...")
+            conn.execute(text("ALTER TABLE layout_settings ADD COLUMN pipeline_config TEXT DEFAULT '{}'"))
