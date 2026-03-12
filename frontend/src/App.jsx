@@ -19,6 +19,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 
 const API_BASE_URL = import.meta.env.PROD ? '' : 'http://localhost:8000';
+const isStaging = import.meta.env.VITE_APP_ENV === 'staging';
 
 function App() {
   const [activeTab, setActiveTab] = useState('main');
@@ -492,16 +493,28 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans selection:bg-indigo-100 selection:text-indigo-900">
+    <div className={cn(
+        "min-h-screen font-sans selection:bg-indigo-100 selection:text-indigo-900 border-t-8",
+        isStaging ? "bg-orange-50/30 border-orange-500" : "bg-slate-50 border-indigo-600"
+    )}>
       
       {/* Navbar */}
-      <nav className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between shadow-sm sticky top-0 z-10">
+      <nav className={cn(
+        "bg-white border-b px-8 py-4 flex items-center justify-between shadow-sm sticky top-0 z-10",
+        isStaging ? "border-orange-200" : "border-slate-200"
+      )}>
         <div className="flex items-center gap-2">
-          <div className="bg-indigo-600 text-white p-1.5 rounded-lg">
+          <div className={cn(
+            "text-white p-1.5 rounded-lg",
+            isStaging ? "bg-orange-500" : "bg-indigo-600"
+          )}>
             <Split className="w-5 h-5" />
           </div>
-          <span className="text-xl font-bold bg-gradient-to-r from-indigo-700 to-indigo-500 bg-clip-text text-transparent">
-            pdfファイル分割
+          <span className={cn(
+            "text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r",
+            isStaging ? "from-orange-600 to-amber-500" : "from-indigo-700 to-indigo-500"
+          )}>
+            {isStaging ? "pdfファイル分割 (Staging)" : "pdfファイル分割"}
           </span>
         </div>
         <div className="flex items-center gap-4 text-sm text-slate-500">
