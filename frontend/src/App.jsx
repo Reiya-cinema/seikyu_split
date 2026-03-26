@@ -308,15 +308,11 @@ function App() {
     setEditingLayout({ ...layout });
     // Reset preview
     setPreviewFile(null);
-    setTestExtractResult(null);
-    setTestKeywordResult(null);
   };
 
   const handleNewLayout = async () => {
     // Reset preview and errors first
     setPreviewFile(null);
-    setTestExtractResult(null);
-    setTestKeywordResult(null);
     setError(null);
     setSuccessMsg(null);
 
