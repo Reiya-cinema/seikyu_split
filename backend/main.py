@@ -2,6 +2,7 @@ from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, FileResponse
+from starlette.background import BackgroundTask
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import io
@@ -14,9 +15,24 @@ import tempfile
 import shutil
 import pdfplumber
 from pypdf import PdfReader, PdfWriter
+import ctypes
 from pydantic import BaseModel
 
 from database import SessionLocal, init_db, LayoutSetting
+
+# Memory management helper
+try:
+    libc = ctypes.CDLL("libc.so.6")
+except Exception:
+    libc = None
+
+def trim_memory():
+    gc.collect()
+    if libc:
+        try:
+            libc.malloc_trim(0)
+        except Exception:
+            pass
 
 app = FastAPI()
 
@@ -237,7 +253,7 @@ async def extract_text_preview(
         # Ensure the temp file is deleted
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
-        gc.collect() # Force garbage collection
+        trim_memory()
 
     return {"text": extracted_text.strip()}
 
@@ -366,7 +382,7 @@ async def preview_layout_analysis(
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
-        gc.collect()
+        trim_memory()
         
     return response
 
@@ -521,7 +537,7 @@ async def scan_pdf(
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
-        gc.collect()
+        trim_memory()
 
     return results
 
@@ -535,7 +551,7 @@ async def execute_split(
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid metadata JSON")
 
-    # Create a temporary file
+    # Create a temporary file for the input
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         try:
             shutil.copyfileobj(file.file, tmp)
@@ -543,13 +559,18 @@ async def execute_split(
         finally:
             tmp.close()
     
+    # Create a temporary file for the ZIP output
+    tmp_zip = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    tmp_zip_path = tmp_zip.name
+    tmp_zip.close() # Will reopen with zipfile
+
     try:
         reader = PdfReader(tmp_path)
         
         # Logic to group pages
         groups = []
         for item in items:
-            page_index = item['page_number'] - 1 # 0-based index for PdfReader
+            page_index = item['page_number'] - 1
             
             if item.get('should_merge', False) and groups:
                 groups[-1]['pages'].append(page_index)
@@ -559,10 +580,7 @@ async def execute_split(
                      "pages": [page_index]
                  })
 
-        # Create ZIP file in memory
-        zip_buffer = io.BytesIO()
-        
-        with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
+        with zipfile.ZipFile(tmp_zip_path, "w", zipfile.ZIP_DEFLATED) as zip_file:
             for group in groups:
                 writer = PdfWriter()
                 for p_idx in group['pages']:
@@ -573,30 +591,42 @@ async def execute_split(
                 if not filename:
                     filename = f"document_{group['pages'][0]+1}"
                 
-                pdf_out = io.BytesIO()
-                writer.write(pdf_out)
+                # Create a temporary file for each split PDF to avoid memory buildup
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as split_tmp:
+                    try:
+                        writer.write(split_tmp)
+                        split_tmp_path = split_tmp.name
+                    finally:
+                        split_tmp.close()
+                    
+                    zip_file.write(split_tmp_path, f"{filename}.pdf")
+                    os.remove(split_tmp_path)
                 
-                # Add to zip
-                zip_file.writestr(f"{filename}.pdf", pdf_out.getvalue())
-                
-                # Help GC
-                del pdf_out
                 del writer
 
-        zip_buffer.seek(0)
-        
-        return StreamingResponse(
-            zip_buffer, 
+        # Cleanup function for background
+        def cleanup():
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            if os.path.exists(tmp_zip_path):
+                os.remove(tmp_zip_path)
+            trim_memory()
+
+        return FileResponse(
+            tmp_zip_path, 
             media_type="application/zip", 
-            headers={"Content-Disposition": "attachment; filename=split_invoices.zip"}
+            filename="split_invoices.zip",
+            background=BackgroundTask(cleanup)
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generating PDF: {str(e)}")
-    finally:
+        # Immediate cleanup on error
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
-        gc.collect()
+        if os.path.exists(tmp_zip_path):
+            os.remove(tmp_zip_path)
+        trim_memory()
+        raise HTTPException(status_code=500, detail=f"Error generating PDF: {str(e)}")
 
 
 # Settings API
