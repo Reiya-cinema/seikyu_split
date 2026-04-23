@@ -9,6 +9,9 @@ import json
 import zipfile
 import os
 import re
+import gc
+import tempfile
+import shutil
 import pdfplumber
 from pypdf import PdfReader, PdfWriter
 from pydantic import BaseModel
@@ -187,13 +190,18 @@ async def extract_text_preview(
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="File must be a PDF")
     
-    contents = await file.read()
-    pdf_file = io.BytesIO(contents)
-    
     extracted_text = ""
     
+    # Create a temporary file to avoid loading everything into memory
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        try:
+            shutil.copyfileobj(file.file, tmp)
+            tmp_path = tmp.name
+        finally:
+            tmp.close()
+
     try:
-        with pdfplumber.open(pdf_file) as pdf:
+        with pdfplumber.open(tmp_path) as pdf:
             if not pdf.pages:
                 return {"text": ""}
             
@@ -225,6 +233,11 @@ async def extract_text_preview(
                 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error extracting text: {str(e)}")
+    finally:
+        # Ensure the temp file is deleted
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        gc.collect() # Force garbage collection
 
     return {"text": extracted_text.strip()}
 
@@ -242,8 +255,13 @@ async def preview_layout_analysis(
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="File must be a PDF")
     
-    contents = await file.read()
-    pdf_file = io.BytesIO(contents)
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        try:
+            shutil.copyfileobj(file.file, tmp)
+            tmp_path = tmp.name
+        finally:
+            tmp.close()
     
     response = {
         "validation": [],
@@ -253,7 +271,7 @@ async def preview_layout_analysis(
     }
     
     try:
-        with pdfplumber.open(pdf_file) as pdf:
+        with pdfplumber.open(tmp_path) as pdf:
             if not pdf.pages:
                 return response
             
@@ -345,6 +363,10 @@ async def preview_layout_analysis(
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error previewing layout: {str(e)}")
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        gc.collect()
         
     return response
 
@@ -357,8 +379,13 @@ async def scan_pdf(
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="File must be a PDF")
     
-    contents = await file.read()
-    pdf_file = io.BytesIO(contents)
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        try:
+            shutil.copyfileobj(file.file, tmp)
+            tmp_path = tmp.name
+        finally:
+            tmp.close()
     
     results = []
     
@@ -373,7 +400,7 @@ async def scan_pdf(
         layouts = db.query(LayoutSetting).all()
 
     try:
-        with pdfplumber.open(pdf_file) as pdf:
+        with pdfplumber.open(tmp_path) as pdf:
             for i, page in enumerate(pdf.pages):
                 page_text = page.extract_text() or ""
                 page_text_norm = normalize_text(page_text)
@@ -491,6 +518,10 @@ async def scan_pdf(
                 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        gc.collect()
 
     return results
 
@@ -504,39 +535,29 @@ async def execute_split(
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid metadata JSON")
 
-    contents = await file.read()
-    input_pdf_stream = io.BytesIO(contents)
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+        try:
+            shutil.copyfileobj(file.file, tmp)
+            tmp_path = tmp.name
+        finally:
+            tmp.close()
     
     try:
-        reader = PdfReader(input_pdf_stream)
+        reader = PdfReader(tmp_path)
         
         # Logic to group pages
-        # We need to iterate through items and group them.
-        # If should_merge is true, it appends to the previous group.
-        
         groups = []
-        current_group = []
-        
-        # Sort items by page number just in case - REMOVED to allow custom ordering from frontend
-        # items.sort(key=lambda x: x['page_number'])
-
-        groups = []
-        current_group = None # Initialize as None to handle first item logic better
-
         for item in items:
             page_index = item['page_number'] - 1 # 0-based index for PdfReader
             
-            # Logic: If merge is true AND we have a current group, append.
-            # Otherwise start new group.
             if item.get('should_merge', False) and groups:
                 groups[-1]['pages'].append(page_index)
             else:
-                 # Start new group
-                 current_group = {
+                 groups.append({
                      "name": item.get('confirmed_name', 'Unknown'),
                      "pages": [page_index]
-                 }
-                 groups.append(current_group)
+                 })
 
         # Create ZIP file in memory
         zip_buffer = io.BytesIO()
@@ -557,6 +578,10 @@ async def execute_split(
                 
                 # Add to zip
                 zip_file.writestr(f"{filename}.pdf", pdf_out.getvalue())
+                
+                # Help GC
+                del pdf_out
+                del writer
 
         zip_buffer.seek(0)
         
@@ -568,6 +593,10 @@ async def execute_split(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating PDF: {str(e)}")
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        gc.collect()
 
 
 # Settings API
