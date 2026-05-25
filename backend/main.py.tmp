@@ -1,0 +1,148 @@
+    log_mem("After Upload")
+    results = []
+    
+    # Get layout settings based on selection or all
+    if layout_ids:
+        try:
+            ids = [int(x) for x in layout_ids.split(",") if x.strip()]
+            layouts = db.query(LayoutSetting).filter(LayoutSetting.id.in_(ids)).all()
+        except ValueError:
+            layouts = db.query(LayoutSetting).all()
+    else:
+        layouts = db.query(LayoutSetting).all()
+
+    try:
+        # Get page count first
+        with pdfplumber.open(tmp_path) as pdf:
+            total_pages = len(pdf.pages)
+            log_mem(f"Total pages: {total_pages}")
+
+        for i in range(total_pages):
+            with pdfplumber.open(tmp_path) as pdf:
+                page = pdf.pages[i]
+                log_mem(f"Processing Page {i+1}")
+                
+                page_text = page.extract_text() or ""
+                page_text_norm = normalize_text(page_text)
+                detected_layout = "Unknown"
+                extracted_name = ""
+                found_keyword_text = ""
+                detection_log = []
+
+                for layout in layouts:
+                    keyword_norm = normalize_text(layout.keyword)
+                    if not keyword_norm:
+                        continue
+
+                    # Optimization: Check if keyword exists in page text first
+                    if keyword_norm not in page_text_norm:
+                        continue
+
+                    # Parse Pipeline Config
+                    try:
+                        pipeline_cfg = json.loads(layout.pipeline_config or '{}')
+                    except Exception:
+                        pipeline_cfg = {}
+                    
+                    validation_steps = pipeline_cfg.get('validation', {}).get('steps', [])
+                    scale = 2.83465
+                    match_found = False
+                    found_text_sample = ""
+
+                    # 1. Validation via Steps (New)
+                    if validation_steps:
+                        # Use extraction logic to get text for validation
+                        # Use a temporary config that just joins text
+                        val_config = {
+                            'extractions': validation_steps,
+                            'processing': {'concat_separator': ''} 
+                        }
+                        
+                        try:
+                            extracted_val = extract_from_pipeline(page, val_config, scale)
+                            extracted_val_norm = normalize_text(extracted_val)
+                            
+                            if keyword_norm in extracted_val_norm:
+                                match_found = True
+                                found_text_sample = extracted_val.strip()
+                        except Exception:
+                            pass
+
+                    # 2. Validation via Coordinates (Legacy)
+                    elif layout.keyword_x1 > 0 and layout.keyword_y1 > 0:
+                        area = (
+                            layout.keyword_x0 * scale,
+                            layout.keyword_y0 * scale,
+                            layout.keyword_x1 * scale,
+                            layout.keyword_y1 * scale
+                        )
+                        try:
+                            cropped = page.crop(area)
+                            extracted_val = cropped.extract_text() or ""
+                            extracted_val_norm = normalize_text(extracted_val)
+                            
+                            if keyword_norm in extracted_val_norm:
+                                match_found = True
+                                found_text_sample = extracted_val.strip()
+                        except Exception:
+                            pass
+
+                    # 3. Text Match (Fallback / No-Coordinates)
+                    else:
+                        # Since we already checked page_text_norm, this is a match
+                        match_found = True
+                        found_text_sample = layout.keyword 
+
+                    if match_found:
+                        detected_layout = layout.name
+                        found_keyword_text = found_text_sample
+                        
+                        # Perform Extraction (Filename)
+                        extraction_steps = pipeline_cfg.get('extractions', [])
+                        
+                        if extraction_steps:
+                             extracted_name = extract_from_pipeline(page, pipeline_cfg, scale)
+                        
+                        # Legacy extraction fallback
+                        elif layout.extract_x1 > 0 and layout.extract_y1 > 0:
+                             area = (
+                                 layout.extract_x0 * scale, 
+                                 layout.extract_y0 * scale, 
+                                 layout.extract_x1 * scale, 
+                                 layout.extract_y1 * scale
+                             )
+                             try:
+                                 extracted_name = page.crop(area).extract_text() or ""
+                             except:
+                                 extracted_name = ""
+                        
+                        extracted_name = clean_text(extracted_name)
+                        extracted_name = remove_whitespace(extracted_name)
+                        
+                        detection_log.append(f"SUCCESS: Layout '{layout.name}' matched. Found text: '{found_keyword_text}'")
+                        break # Stop checking other layouts
+                
+                if detected_layout == "Unknown":
+                   detection_log.append("No layout matched.")
+
+                results.append({
+                    "page_number": i + 1,
+                    "extracted_text": extracted_name, 
+                    "layout_name": detected_layout,
+                    "confirmed_name": extracted_name,
+                    "should_merge": False,
+                    "found_keyword_text": found_keyword_text,
+                    "detection_log": detection_log
+                })
+                log_mem(f"After Page {i+1}")
+                
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        log_mem("Before trim_memory")
+        trim_memory()
+        log_mem("After trim_memory")
+
+    return results

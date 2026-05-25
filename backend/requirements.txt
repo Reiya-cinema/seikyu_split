@@ -1,7 +1,8 @@
 fastapi
-uvicorn
-python-multipart
 pdfplumber
+psutil==7.2.2
 pypdf
-sqlalchemy
+python-multipart
 requests
+sqlalchemy
+uvicorn
