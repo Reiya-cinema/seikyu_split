@@ -676,9 +676,9 @@ export default function LayoutPipelineEditor({
                                         <span className="text-[10px] text-slate-600">英字大文字化</span>
                                     </label>
                                 </div>
-                                <div className="mt-2 grid grid-cols-2 gap-2 border-t border-slate-100 pt-2">
+                                <div className="mt-2 flex flex-col gap-1.5 border-t border-slate-100 pt-2">
                                     <div className="flex items-center gap-1.5 text-[10px]">
-                                        <span className="text-slate-400 shrink-0">固定プレフィックス:</span>
+                                        <span className="text-slate-400 shrink-0 w-24">固定プレフィックス:</span>
                                         <input
                                             type="text"
                                             value={config.processing.filename_prefix || ""}
@@ -688,7 +688,7 @@ export default function LayoutPipelineEditor({
                                         />
                                     </div>
                                     <div className="flex items-center gap-1.5 text-[10px]">
-                                        <span className="text-slate-400 shrink-0">固定サフィックス:</span>
+                                        <span className="text-slate-400 shrink-0 w-24">固定サフィックス:</span>
                                         <input
                                             type="text"
                                             value={config.processing.filename_suffix || ""}
