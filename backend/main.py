@@ -97,7 +97,12 @@ def process_extracted_text(parts: List[str], options: dict) -> str:
             text = re.sub(pattern, "", text)
         except re.error:
             pass # Invalid regex
-            
+
+    prefix = options.get('filename_prefix', '')
+    suffix = options.get('filename_suffix', '')
+    if prefix or suffix:
+        text = f"{prefix}{text}{suffix}"
+
     return text
 
 def extract_from_step(page, step: dict, scale: float = 2.83465):

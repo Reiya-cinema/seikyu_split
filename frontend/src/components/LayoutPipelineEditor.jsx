@@ -676,10 +676,32 @@ export default function LayoutPipelineEditor({
                                         <span className="text-[10px] text-slate-600">英字大文字化</span>
                                     </label>
                                 </div>
+                                <div className="mt-2 grid grid-cols-2 gap-2 border-t border-slate-100 pt-2">
+                                    <div className="flex items-center gap-1.5 text-[10px]">
+                                        <span className="text-slate-400 shrink-0">固定プレフィックス:</span>
+                                        <input
+                                            type="text"
+                                            value={config.processing.filename_prefix || ""}
+                                            onChange={(e) => updateConfigSection('processing', { filename_prefix: e.target.value })}
+                                            className="flex-1 border-b border-slate-300 focus:border-emerald-500 outline-none bg-transparent"
+                                            placeholder="例: 請求書_"
+                                        />
+                                    </div>
+                                    <div className="flex items-center gap-1.5 text-[10px]">
+                                        <span className="text-slate-400 shrink-0">固定サフィックス:</span>
+                                        <input
+                                            type="text"
+                                            value={config.processing.filename_suffix || ""}
+                                            onChange={(e) => updateConfigSection('processing', { filename_suffix: e.target.value })}
+                                            className="flex-1 border-b border-slate-300 focus:border-emerald-500 outline-none bg-transparent"
+                                            placeholder="例: _確認済"
+                                        />
+                                    </div>
+                                </div>
                                 <div className="mt-2 flex items-center gap-2 text-[10px] p-1 border-t border-slate-100 pt-2">
                                     <span className="text-slate-400">除去パターン(正規表現):</span>
-                                    <input 
-                                        type="text" 
+                                    <input
+                                        type="text"
                                         value={config.processing.remove_pattern || ""}
                                         onChange={(e) => updateConfigSection('processing', { remove_pattern: e.target.value })}
                                         className="flex-1 border-b border-slate-300 focus:border-emerald-500 outline-none bg-transparent"
