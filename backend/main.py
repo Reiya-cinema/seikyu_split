@@ -22,6 +22,9 @@ from pydantic import BaseModel
 
 from database import SessionLocal, init_db, LayoutSetting
 
+# Memory debug logging flag (set to True to enable CHECKPOINT logs)
+MEMORY_DEBUG = False
+
 # Memory management helper
 try:
     libc = ctypes.CDLL("libc.so.6")
@@ -423,6 +426,8 @@ async def scan_pdf(
     db: Session = Depends(get_db)
 ):
     def log_mem(step):
+        if not MEMORY_DEBUG:
+            return
         m = process.memory_info().rss / (1024 * 1024)
         print(f"CHECKPOINT [{step}]: {m:.2f} MB")
 
@@ -583,6 +588,7 @@ async def scan_pdf(
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
+        trim_memory()
         log_mem("After cleanup")
 
     return results
