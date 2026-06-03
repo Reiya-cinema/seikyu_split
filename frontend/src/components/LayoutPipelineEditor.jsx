@@ -102,6 +102,7 @@ export default function LayoutPipelineEditor({
             processing: parsedConfig.processing || {
                 remove_whitespace: true,
                 uppercase: false,
+                katakana_to_half: false,
                 remove_pattern: "",
                 concat_separator: "_"
             },
@@ -656,10 +657,10 @@ export default function LayoutPipelineEditor({
                                         ))}
                                     </div>
                                 </div>
-                                <div className="grid grid-cols-2 gap-2">
+                                <div className="grid grid-cols-3 gap-2">
                                     <label className="flex items-center gap-1.5 cursor-pointer hover:bg-white p-1 rounded transition-colors">
-                                        <input 
-                                            type="checkbox" 
+                                        <input
+                                            type="checkbox"
                                             checked={config.processing.remove_whitespace || false}
                                             onChange={(e) => updateConfigSection('processing', { remove_whitespace: e.target.checked })}
                                             className="w-3 h-3 accent-emerald-600 rounded" 
@@ -667,13 +668,22 @@ export default function LayoutPipelineEditor({
                                         <span className="text-[10px] text-slate-600">空白削除 (全角/半角)</span>
                                     </label>
                                     <label className="flex items-center gap-1.5 cursor-pointer hover:bg-white p-1 rounded transition-colors">
-                                        <input 
-                                            type="checkbox" 
+                                        <input
+                                            type="checkbox"
                                             checked={config.processing.uppercase || false}
                                             onChange={(e) => updateConfigSection('processing', { uppercase: e.target.checked })}
-                                            className="w-3 h-3 accent-emerald-600 rounded" 
+                                            className="w-3 h-3 accent-emerald-600 rounded"
                                         />
                                         <span className="text-[10px] text-slate-600">英字大文字化</span>
+                                    </label>
+                                    <label className="flex items-center gap-1.5 cursor-pointer hover:bg-white p-1 rounded transition-colors">
+                                        <input
+                                            type="checkbox"
+                                            checked={config.processing.katakana_to_half || false}
+                                            onChange={(e) => updateConfigSection('processing', { katakana_to_half: e.target.checked })}
+                                            className="w-3 h-3 accent-emerald-600 rounded"
+                                        />
+                                        <span className="text-[10px] text-slate-600">カタカナ半角化</span>
                                     </label>
                                 </div>
                                 <div className="mt-2 flex flex-col gap-1.5 border-t border-slate-100 pt-2">
