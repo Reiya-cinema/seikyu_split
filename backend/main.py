@@ -567,23 +567,23 @@ async def scan_pdf(
 
                 results.append({
                     "page_number": i + 1,
-                    "extracted_text": extracted_name, 
+                    "extracted_text": extracted_name,
                     "layout_name": detected_layout,
                     "confirmed_name": extracted_name,
                     "should_merge": False,
                     "found_keyword_text": found_keyword_text,
                     "detection_log": detection_log
                 })
-                log_mem(f"After Page {i+1}")
-                
+                del page
+            log_mem(f"After Page {i+1}")
+            trim_memory()
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}")
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
-        log_mem("Before trim_memory")
-        trim_memory()
-        log_mem("After trim_memory")
+        log_mem("After cleanup")
 
     return results
 
@@ -630,7 +630,7 @@ async def execute_split(
             for group in groups:
                 writer = PdfWriter()
                 for p_idx in group['pages']:
-                    writer.add_page(reader.pages[p_idx])
+                    writer.add_page(reader.pages[p_idx])  # type: ignore
                 
                 # Sanitized filename
                 filename = "".join([c for c in group['name'] if c.isalnum() or c in (' ', '-', '_')]).strip()
@@ -649,6 +649,8 @@ async def execute_split(
                     os.remove(split_tmp_path)
                 
                 del writer
+
+        del reader
 
         # Cleanup function for background
         def cleanup():
