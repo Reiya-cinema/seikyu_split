@@ -639,7 +639,7 @@ async def execute_split(
                     writer.add_page(reader.pages[p_idx])  # type: ignore
                 
                 # Sanitized filename
-                filename = "".join([c for c in group['name'] if c.isalnum() or c in (' ', '-', '_')]).strip()
+                filename = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '_', group['name']).strip().rstrip('. ')[:120]
                 if not filename:
                     filename = f"document_{group['pages'][0]+1}"
                 
